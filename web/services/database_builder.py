@@ -145,7 +145,7 @@ def import_steam_games(conn):
     try:
         from ..sources.steam import get_steam_library
 
-        games = get_steam_library(fetch_reviews=True, max_workers=5)
+        games = get_steam_library()
         if not games:
             print("  No Steam games found or not authenticated")
             return 0
