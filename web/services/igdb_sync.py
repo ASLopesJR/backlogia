@@ -260,9 +260,9 @@ def add_igdb_columns(conn):
         ("aggregated_rating_count", "INTEGER"),
         ("total_rating", "REAL"),  # Combined rating (0-100)
         ("total_rating_count", "INTEGER"),
-        ("igdb_summary", "TEXT"),
-        ("igdb_cover_url", "TEXT"),
-        ("igdb_screenshots", "TEXT"),  # JSON array of screenshot URLs
+        ("summary", "TEXT"),
+        ("cover_url", "TEXT"),
+        ("screenshots", "TEXT"),  # JSON array of screenshot URLs
         ("igdb_matched_at", "TIMESTAMP"),
         ("nsfw", "BOOLEAN DEFAULT 0"),  # NSFW flag (from IGDB themes/age ratings or manual)
         ("steam_app_id", "TEXT"),  # Steam App ID from IGDB external_games (for ProtonDB)
@@ -503,9 +503,9 @@ def sync_games(conn, client, limit=None, force=False, progress_callback=None):
                         aggregated_rating_count = ?,
                         total_rating = ?,
                         total_rating_count = ?,
-                        igdb_summary = ?,
-                        igdb_cover_url = ?,
-                        igdb_screenshots = ?,
+                        summary = ?,
+                        cover_url = ?,
+                        screenshots = ?,
                         igdb_matched_at = CURRENT_TIMESTAMP,
                         nsfw = ?,
                         genres = ?,
