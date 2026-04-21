@@ -1,7 +1,6 @@
 # steam_sync.py
 # Fetches Steam review scores and updates games in the database
 
-import json
 import sqlite3
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -32,6 +31,31 @@ def _rate_limited_request(url, params=None):
         response = requests.get(url, params=params, timeout=10)
         return response
     except requests.RequestException:
+        return None
+
+def get_steam_store_info(appid):
+    """Fetch store info for a Steam game.
+
+    Returns a dict with:
+    - screenshots: percentage of positive reviews (0-100)
+    - summary: text description (e.g., "Very Positive")
+    - cover_url: total number of reviews
+    """
+    url = f"https://store.steampowered.com/api/appdetails?appids={appid}"
+
+    response = _rate_limited_request(url)
+    if not response or response.status_code != 200:
+        return None
+
+    try:
+        data = response.json().get(f"{appid}")
+        summary = data.get("data", {}).get("detailed_description")
+        print(summary)
+
+        return {
+            "summary": summary,
+        }
+    except (ValueError, KeyError):
         return None
 
 
@@ -93,11 +117,11 @@ def sync_steam_reviews(conn, force=False, max_workers=5, progress_callback=None)
 
     if force:
         cursor.execute(
-            "SELECT id, store_id, name, extra_data FROM games WHERE store = 'steam' AND store_id IS NOT NULL"
+            "SELECT id, store_id, name FROM games WHERE store = 'steam' AND store_id IS NOT NULL"
         )
     else:
         cursor.execute(
-            """SELECT id, store_id, name, extra_data FROM games
+            """SELECT id, store_id, name FROM games
                WHERE store = 'steam' AND store_id IS NOT NULL AND critics_score IS NULL"""
         )
 
@@ -117,15 +141,15 @@ def sync_steam_reviews(conn, force=False, max_workers=5, progress_callback=None)
     db_path = conn.execute("PRAGMA database_list").fetchone()[2]
 
     def fetch_and_update(row):
-        game_id, store_id, name, extra_data_json = row
+        game_id, store_id, name = row
         reviews = get_steam_review_score(store_id)
-        return game_id, name, extra_data_json, reviews
+        return game_id, name, reviews
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(fetch_and_update, row): row for row in games}
 
         for future in as_completed(futures):
-            game_id, name, extra_data_json, reviews = future.result()
+            game_id, name, reviews = future.result()
 
             with results_lock:
                 completed += 1
@@ -133,23 +157,15 @@ def sync_steam_reviews(conn, force=False, max_workers=5, progress_callback=None)
                     progress_callback(completed, total, f"Processing: {name[:50]}...")
 
             if reviews:
-                try:
-                    extra_data = json.loads(extra_data_json) if extra_data_json else {}
-                except (ValueError, TypeError):
-                    extra_data = {}
-
-                extra_data["review_desc"] = reviews["review_desc"]
-                extra_data["total_reviews"] = reviews["total_reviews"]
-
                 # Each thread needs its own connection
                 thread_conn = sqlite3.connect(db_path)
                 thread_conn.execute(
                     """UPDATE games SET
                         critics_score = ?,
-                        extra_data = ?,
+                        extra_data = json_set(COALESCE(extra_data, '{}'), '$.review_desc', ?, '$.total_reviews', ?),
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?""",
-                    (reviews["review_score"], json.dumps(extra_data), game_id),
+                    (reviews["review_score"], reviews["review_desc"], reviews["total_reviews"], game_id),
                 )
                 thread_conn.commit()
                 thread_conn.close()
@@ -176,5 +192,6 @@ def sync_steam(conn, force=False, max_workers=5, progress_callback=None):
     """
 
     updated, failed = sync_steam_reviews(conn, force, max_workers, progress_callback)
+    get_steam_store_info(239140)
 
     return updated, failed

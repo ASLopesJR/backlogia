@@ -162,28 +162,26 @@ def import_steam_games(conn):
 
                 cursor.execute("""
                     INSERT INTO games (
-                        name, store, store_id, cover_image, background_image, icon,
-                        playtime_hours, critics_score, extra_data, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        name, store, store_id, steam_app_id, cover_image, background_image, icon,
+                        playtime_hours, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(store, store_id) DO UPDATE SET
                         name = excluded.name,
+                        steam_app_id = excluded.steam_app_id,
                         cover_image = excluded.cover_image,
                         background_image = excluded.background_image,
                         icon = excluded.icon,
                         playtime_hours = excluded.playtime_hours,
-                        critics_score = excluded.critics_score,
-                        extra_data = excluded.extra_data,
                         updated_at = excluded.updated_at
                 """, (
                     game.get("name"),
                     "steam",
                     store_id,
+                    store_id,
                     cover_image,
                     background_image,
                     game.get("icon_url"),
                     game.get("playtime_hours"),
-                    game.get("review_score"),  # Steam user review percentage
-                    json.dumps(game),
                     datetime.now().isoformat()
                 ))
                 if store_id:
