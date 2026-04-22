@@ -53,6 +53,7 @@ def create_database():
             -- Tracking
             added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            steam_synced_at TIMESTAMP,
 
             -- Soft-delete for games removed from store
             removed BOOLEAN DEFAULT 0,
@@ -881,6 +882,18 @@ def add_average_rating_column(conn):
     if "average_rating" not in existing_columns:
         cursor.execute("ALTER TABLE games ADD COLUMN average_rating REAL")
         print("Added column: average_rating")
+        conn.commit()
+
+
+def add_steam_synced_at_column(conn):
+    """Add steam_synced_at column to the database if it doesn't exist."""
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(games)")
+    existing_columns = {row[1] for row in cursor.fetchall()}
+
+    if "steam_synced_at" not in existing_columns:
+        cursor.execute("ALTER TABLE games ADD COLUMN steam_synced_at TIMESTAMP")
+        print("Added column: steam_synced_at")
         conn.commit()
 
 

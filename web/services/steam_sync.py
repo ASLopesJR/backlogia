@@ -11,6 +11,7 @@ from threading import Lock
 import requests
 
 from .settings import get_steam_credentials
+from .database_builder import add_steam_synced_at_column
 
 # Rate limiting for Steam Store API
 _rate_limit_lock = Lock()
@@ -67,6 +68,9 @@ def get_steam_store_info(appid):
         summary = data.get("detailed_description")
         developers = data.get("developers")
         publishers = data.get("publishers")
+        screenshots = [
+            s["path_full"] for s in data.get("screenshots") or [] if s.get("path_full")
+        ][:5]
         json_data = data.get("release_date") or {}
         comming_soon = json_data.get("coming_soon")
         release_date_raw = json_data.get("date")
@@ -84,6 +88,7 @@ def get_steam_store_info(appid):
             "developers": developers,
             "publishers": publishers,
             "release_date": release_date,
+            "screenshots": screenshots,
         }, None
     except Exception as e:
         return None, f"parse_error: {e}"
@@ -146,6 +151,8 @@ def sync_steam_store_info(conn, force=False, max_workers=5, progress_callback=No
     """
     cursor = conn.cursor()
 
+    add_steam_synced_at_column(conn)
+
     # Backfill steam_app_id from store_id for Steam games that predate this column
     cursor.execute(
         "UPDATE games SET steam_app_id = store_id WHERE store = 'steam' AND steam_app_id IS NULL AND store_id IS NOT NULL"
@@ -159,7 +166,7 @@ def sync_steam_store_info(conn, force=False, max_workers=5, progress_callback=No
     else:
         cursor.execute(
             """SELECT id, steam_app_id, name FROM games
-               WHERE steam_app_id IS NOT NULL AND developers IS NULL"""
+               WHERE steam_app_id IS NOT NULL AND steam_synced_at IS NULL"""
         )
 
     games = cursor.fetchall()
@@ -202,12 +209,15 @@ def sync_steam_store_info(conn, force=False, max_workers=5, progress_callback=No
                         developers = ?,
                         publishers = ?,
                         release_date = ?,
+                        screenshots = ?,
+                        steam_synced_at = CURRENT_TIMESTAMP,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?""",
                     (store_info["summary"], 
                      json.dumps(store_info["developers"]) if store_info["developers"] else None, 
                      json.dumps(store_info["publishers"]) if store_info["publishers"] else None, 
                      store_info["release_date"], 
+                     json.dumps(store_info["screenshots"]) if store_info["screenshots"] else None, 
                      game_id),
                 )
                 thread_conn.commit()
