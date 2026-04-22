@@ -10,7 +10,6 @@ from threading import Lock
 
 import requests
 
-from .settings import get_steam_credentials
 from .database_builder import add_steam_synced_at_column
 
 # Rate limiting for Steam Store API
@@ -40,15 +39,11 @@ def get_steam_store_info(appid):
     """Fetch store info for a Steam game.
 
     Returns a dict with:
-    - screenshots: percentage of positive reviews (0-100)
-    - summary: text description (e.g., "Very Positive")
-    - developers: 
-    - publishers: 
-    - release_date: 
-
-    {% set developers = parse_json(game.developers) %}
-    {% set publishers = parse_json(game.publishers) %}
-    {% if game.release_date %}
+    - screenshots: Steam store screenshots (max 5)
+    - summary: text description 
+    - developers: developers list
+    - publishers: publishers list
+    - release_date: release date
     """
     url = f"https://store.steampowered.com/api/appdetails?appids={appid}"
 
@@ -203,31 +198,46 @@ def sync_steam_store_info(conn, force=False, max_workers=5, progress_callback=No
             if store_info:
                 # Each thread needs its own connection
                 thread_conn = sqlite3.connect(db_path)
-                thread_conn.execute(
-                    """UPDATE games SET
-                        summary = ?,
-                        developers = ?,
-                        publishers = ?,
-                        release_date = ?,
-                        screenshots = ?,
-                        steam_synced_at = CURRENT_TIMESTAMP,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?""",
-                    (store_info["summary"], 
-                     json.dumps(store_info["developers"]) if store_info["developers"] else None, 
-                     json.dumps(store_info["publishers"]) if store_info["publishers"] else None, 
-                     store_info["release_date"], 
-                     json.dumps(store_info["screenshots"]) if store_info["screenshots"] else None, 
-                     game_id),
-                )
-                thread_conn.commit()
-                thread_conn.close()
+                try:
+                    thread_conn.execute(
+                        """UPDATE games SET
+                            summary = ?,
+                            developers = ?,
+                            publishers = ?,
+                            release_date = ?,
+                            screenshots = ?,
+                            steam_synced_at = CURRENT_TIMESTAMP,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?""",
+                        (store_info["summary"],
+                         json.dumps(store_info["developers"]) if store_info["developers"] else None,
+                         json.dumps(store_info["publishers"]) if store_info["publishers"] else None,
+                         store_info["release_date"],
+                         json.dumps(store_info["screenshots"]) if store_info["screenshots"] else None,
+                         game_id),
+                    )
+                    thread_conn.commit()
+                finally:
+                    thread_conn.close()
 
                 with results_lock:
                     updated += 1
             else:
                 if reason not in ("not_found", "no_data"):
                     print(f"  [store info] {name} (appid={store_id}): {reason}")
+                thread_conn = sqlite3.connect(db_path)
+                try:
+                    thread_conn.execute(
+                        """UPDATE games SET
+                            steam_synced_at = CURRENT_TIMESTAMP,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?""",
+                        (game_id,),
+                    )
+                    thread_conn.commit()
+                finally:
+                    thread_conn.close()
+
                 with results_lock:
                     failed += 1
 
@@ -292,16 +302,18 @@ def sync_steam_reviews(conn, force=False, max_workers=5, progress_callback=None)
             if reviews:
                 # Each thread needs its own connection
                 thread_conn = sqlite3.connect(db_path)
-                thread_conn.execute(
-                    """UPDATE games SET
-                        critics_score = ?,
-                        extra_data = json_set(COALESCE(extra_data, '{}'), '$.review_desc', ?, '$.total_reviews', ?),
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?""",
-                    (reviews["review_score"], reviews["review_desc"], reviews["total_reviews"], game_id),
-                )
-                thread_conn.commit()
-                thread_conn.close()
+                try:
+                    thread_conn.execute(
+                        """UPDATE games SET
+                            critics_score = ?,
+                            extra_data = json_set(COALESCE(extra_data, '{}'), '$.review_desc', ?, '$.total_reviews', ?),
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?""",
+                        (reviews["review_score"], reviews["review_desc"], reviews["total_reviews"], game_id),
+                    )
+                    thread_conn.commit()
+                finally:
+                    thread_conn.close()
 
                 with results_lock:
                     updated += 1
@@ -324,7 +336,14 @@ def sync_steam(conn, force=False, max_workers=5, progress_callback=None):
         (updated, failed) counts
     """
 
-    updated, failed = sync_steam_reviews(conn, force, max_workers, progress_callback)
-    updated, failed = sync_steam_store_info(conn, force, 1, progress_callback)
+    def make_phase_progress(prefix):
+        if not progress_callback:
+            return None
+        def _cb(current, total, message):
+            progress_callback(current, total, f"[{prefix}] {message}")
+        return _cb
 
-    return updated, failed
+    reviews_updated, reviews_failed = sync_steam_reviews(conn, force, max_workers, make_phase_progress("Reviews"))
+    store_updated, store_failed = sync_steam_store_info(conn, force, 1, make_phase_progress("Store info"))
+
+    return reviews_updated + store_updated, reviews_failed, store_failed
