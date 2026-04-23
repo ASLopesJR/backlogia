@@ -817,9 +817,11 @@ def sync_games(conn, client, limit=None, force=False, progress_callback=None):
     else:
         fallback_steam = []
 
+    steam_game_ids = {gid for gid, *_ in steam_games}
+
     epic_games = []
     for gid, name, store, genres, rd, sid, extra_raw, _ in games:
-        if store != "epic":
+        if store != "epic" or gid in steam_game_ids:
             continue
         product_slug = None
         if extra_raw:
@@ -856,7 +858,7 @@ def sync_games(conn, client, limit=None, force=False, progress_callback=None):
 
     gog_games = []
     for gid, name, store, genres, rd, sid, extra_raw, _ in games:
-        if store != "gog":
+        if store != "gog" or gid in steam_game_ids:
             continue
         gog_slug = None
         if extra_raw:
@@ -896,7 +898,7 @@ def sync_games(conn, client, limit=None, force=False, progress_callback=None):
 
     amazon_games = []
     for gid, name, store, genres, rd, sid, extra_raw, _ in games:
-        if store != "amazon":
+        if store != "amazon" or gid in steam_game_ids:
             continue
         steam_appid = None
         if extra_raw:
