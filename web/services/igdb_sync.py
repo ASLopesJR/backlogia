@@ -645,18 +645,34 @@ def apply_igdb_data(conn, game_id, igdb_game, existing_genres=None):
     # Extract Steam App ID from IGDB external_games
     steam_app_id = IGDBClient.extract_steam_app_id(igdb_game)
 
-    # Fetch existing genres if not provided
+    # Fetch existing genres if not provided, and check if already steam-synced
     if existing_genres is None:
-        cursor.execute("SELECT genres FROM games WHERE id = ?", (game_id,))
+        cursor.execute("SELECT genres, steam_synced_at FROM games WHERE id = ?", (game_id,))
         row = cursor.fetchone()
         existing_genres = row[0] if row else None
+        steam_synced = bool(row[1]) if row else False
+    else:
+        cursor.execute("SELECT steam_synced_at FROM games WHERE id = ?", (game_id,))
+        row = cursor.fetchone()
+        steam_synced = bool(row[0]) if row else False
 
     # Extract genres and themes from IGDB and merge with existing
     igdb_tags = extract_genres_and_themes(igdb_game)
     merged_genres = merge_and_dedupe_genres(existing_genres, igdb_tags)
 
+    # If Steam has already synced this game, preserve its summary/cover/screenshots.
+    # Otherwise IGDB data takes priority and overwrites directly.
+    if steam_synced:
+        summary_expr = "summary = COALESCE(summary, ?)"
+        cover_expr   = "cover_url = COALESCE(cover_url, ?)"
+        shots_expr   = "screenshots = COALESCE(screenshots, ?)"
+    else:
+        summary_expr = "summary = ?"
+        cover_expr   = "cover_url = ?"
+        shots_expr   = "screenshots = ?"
+
     cursor.execute(
-        """UPDATE games SET
+        f"""UPDATE games SET
             igdb_id = ?,
             igdb_slug = ?,
             igdb_rating = ?,
@@ -665,9 +681,9 @@ def apply_igdb_data(conn, game_id, igdb_game, existing_genres=None):
             aggregated_rating_count = ?,
             total_rating = ?,
             total_rating_count = ?,
-            summary = COALESCE(summary, ?),
-            cover_url = COALESCE(cover_url, ?),
-            screenshots = COALESCE(screenshots, ?),
+            {summary_expr},
+            {cover_expr},
+            {shots_expr},
             igdb_matched_at = CURRENT_TIMESTAMP,
             nsfw = ?,
             genres = ?,
