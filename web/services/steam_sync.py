@@ -148,12 +148,6 @@ def sync_steam_store_info(conn, force=False, max_workers=5, progress_callback=No
 
     add_steam_synced_at_column(conn)
 
-    # Backfill steam_app_id from store_id for Steam games that predate this column
-    cursor.execute(
-        "UPDATE games SET steam_app_id = store_id WHERE store = 'steam' AND steam_app_id IS NULL AND store_id IS NOT NULL"
-    )
-    conn.commit()
-
     if force:
         cursor.execute(
             "SELECT id, steam_app_id, name FROM games WHERE steam_app_id IS NOT NULL"
@@ -201,11 +195,11 @@ def sync_steam_store_info(conn, force=False, max_workers=5, progress_callback=No
                 try:
                     thread_conn.execute(
                         """UPDATE games SET
-                            summary = ?,
-                            developers = ?,
-                            publishers = ?,
-                            release_date = ?,
-                            screenshots = ?,
+                            summary = COALESCE(?, summary),
+                            developers = COALESCE(?, developers),
+                            publishers = COALESCE(?, publishers),
+                            release_date = COALESCE(?, release_date),
+                            screenshots = COALESCE(?, screenshots),
                             steam_synced_at = CURRENT_TIMESTAMP,
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?""",
@@ -260,12 +254,12 @@ def sync_steam_reviews(conn, force=False, max_workers=5, progress_callback=None)
 
     if force:
         cursor.execute(
-            "SELECT id, store_id, name FROM games WHERE store = 'steam' AND store_id IS NOT NULL"
+            "SELECT id, steam_app_id, name FROM games WHERE steam_app_id IS NOT NULL"
         )
     else:
         cursor.execute(
-            """SELECT id, store_id, name FROM games
-               WHERE store = 'steam' AND store_id IS NOT NULL AND critics_score IS NULL"""
+            """SELECT id, steam_app_id, name FROM games
+               WHERE steam_app_id IS NOT NULL AND critics_score IS NULL"""
         )
 
     games = cursor.fetchall()
@@ -342,6 +336,12 @@ def sync_steam(conn, force=False, max_workers=5, progress_callback=None):
         def _cb(current, total, message):
             progress_callback(current, total, f"[{prefix}] {message}")
         return _cb
+
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE games SET steam_app_id = store_id WHERE store = 'steam' AND steam_app_id IS NULL AND store_id IS NOT NULL"
+    )
+    conn.commit()
 
     reviews_updated, reviews_failed = sync_steam_reviews(conn, force, max_workers, make_phase_progress("Reviews"))
     store_updated, store_failed = sync_steam_store_info(conn, force, 1, make_phase_progress("Store info"))
