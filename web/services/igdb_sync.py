@@ -791,24 +791,24 @@ def sync_games(conn, client, limit=None, force=False, progress_callback=None):
     failed = 0
 
     steam_games = [
-        (gid, name, store, genres, rd, sid, extra)
+        (gid, name, store, genres, rd, sid, extra, sid if store == "steam" else appid)
         for gid, name, store, genres, rd, sid, extra, appid in games
-        if appid
+        if store == "steam" or appid
     ]
     if steam_games:
         print(f"Batch-resolving {len(steam_games)} Steam games...")
         if progress_callback:
             progress_callback(0, total, f"Batch-resolving {len(steam_games)} Steam games...")
-        appids = [sid for _, _, _, _, _, sid, _ in steam_games]
+        appids = [appid for _, _, _, _, _, _, _, appid in steam_games]
         appid_to_game = client.batch_lookup_steam(appids)
         fallback_steam = []
-        for gid, name, store, existing_genres, rd, sid, _ in steam_games:
-            game_data = appid_to_game.get(str(sid))
+        for gid, name, store, existing_genres, rd, sid, _, appid in steam_games:
+            game_data = appid_to_game.get(str(appid))
             if game_data:
                 apply_igdb_data(conn, gid, game_data, existing_genres=existing_genres)
                 conn.commit()
                 rating_str = f" (rating: {game_data['total_rating']:.1f})" if game_data.get("total_rating") else ""
-                print(f"  [{sid}] matched: {game_data['name']}{rating_str}")
+                print(f"  [{appid}] matched: {game_data['name']}{rating_str}")
                 matched += 1
             else:
                 fallback_steam.append((gid, name, store, existing_genres, rd, sid, None))
@@ -818,7 +818,7 @@ def sync_games(conn, client, limit=None, force=False, progress_callback=None):
         fallback_steam = []
 
     epic_games = []
-    for gid, name, store, genres, rd, sid, extra_raw in games:
+    for gid, name, store, genres, rd, sid, extra_raw, _ in games:
         if store != "epic":
             continue
         product_slug = None
@@ -855,7 +855,7 @@ def sync_games(conn, client, limit=None, force=False, progress_callback=None):
         fallback_epic = list(epic_no_slug)
 
     gog_games = []
-    for gid, name, store, genres, rd, sid, extra_raw in games:
+    for gid, name, store, genres, rd, sid, extra_raw, _ in games:
         if store != "gog":
             continue
         gog_slug = None
@@ -895,7 +895,7 @@ def sync_games(conn, client, limit=None, force=False, progress_callback=None):
         fallback_gog = list(gog_no_slug)
 
     amazon_games = []
-    for gid, name, store, genres, rd, sid, extra_raw in games:
+    for gid, name, store, genres, rd, sid, extra_raw, _ in games:
         if store != "amazon":
             continue
         steam_appid = None
@@ -950,7 +950,7 @@ def sync_games(conn, client, limit=None, force=False, progress_callback=None):
     )
     other_games = [
         (gid, name, store, genres, rd, sid, extra)
-        for gid, name, store, genres, rd, sid, extra in games
+        for gid, name, store, genres, rd, sid, extra, _ in games
         if gid not in batch_resolved_ids
     ]
     slug_fallback_pool = fallback_steam + fallback_epic + fallback_gog + fallback_amazon + other_games
