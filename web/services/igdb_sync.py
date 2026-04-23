@@ -771,11 +771,11 @@ def sync_games(conn, client, limit=None, force=False, progress_callback=None):
 
     if force:
         cursor.execute(
-            "SELECT id, name, store, genres, release_date, store_id, extra_data FROM games WHERE name IS NOT NULL ORDER BY name"
+            "SELECT id, name, store, genres, release_date, store_id, extra_data, steam_app_id FROM games WHERE name IS NOT NULL ORDER BY name"
         )
     else:
         cursor.execute(
-            """SELECT id, name, store, genres, release_date, store_id, extra_data FROM games
+            """SELECT id, name, store, genres, release_date, store_id, extra_data, steam_app_id FROM games
                WHERE name IS NOT NULL AND igdb_id IS NULL
                ORDER BY name"""
         )
@@ -792,8 +792,8 @@ def sync_games(conn, client, limit=None, force=False, progress_callback=None):
 
     steam_games = [
         (gid, name, store, genres, rd, sid, extra)
-        for gid, name, store, genres, rd, sid, extra in games
-        if store == "steam" and sid
+        for gid, name, store, genres, rd, sid, extra, appid in games
+        if appid
     ]
     if steam_games:
         print(f"Batch-resolving {len(steam_games)} Steam games...")
