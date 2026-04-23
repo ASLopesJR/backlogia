@@ -240,6 +240,19 @@ def update_cover_override(game_id: int, body: UpdateCoverOverrideRequest, conn: 
     return {"success": True, "cover_url_override": cover_url}
 
 
+@router.post("/api/game/{game_id}/cover-override-sgdb")
+def update_cover_override_sgdb(game_id: int, conn: sqlite3.Connection = Depends(get_db)):
+    """Update the cover art override URL for a game from SteamGridDB."""
+    from ..services.steamgrid_sync import sync_steamgrid_by_id
+
+    status, error = sync_steamgrid_by_id(conn, game_id)
+    conn.commit()
+    if error:
+        return {"success": False, "error": f"{error}"}
+
+    return {"success": True, "message": "Cover URL updated from SteamGridDB"}
+
+
 @router.post("/api/game/{game_id}/metacritic")
 def update_metacritic(game_id: int, body: UpdateMetacriticRequest, conn: sqlite3.Connection = Depends(get_db)):
     """Set custom Metacritic slug and fetch data."""

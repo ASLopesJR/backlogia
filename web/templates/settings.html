@@ -137,6 +137,7 @@
 
         .section-icon.display { background: #667eea; }
         .section-icon.steam { background: #1b2838; }
+        .section-icon.steamgrid { background: #051865; }
         .section-icon.igdb { background: #9147ff; }
         .section-icon.itch { background: #fa5c5c; }
         .section-icon.epic { background: #0078f2; }
@@ -611,6 +612,7 @@
         }
 
         .sync-btn .icon.all { background: linear-gradient(90deg, #667eea, #764ba2); }
+        .sync-btn .icon.steamgrid { background: #051865; }
         .sync-btn .icon.igdb { background: #9147ff; }
         .sync-btn .icon.metacritic { background: #ffcc34; color: #000; }
         .sync-btn .icon.protondb { background: #7e57c2; }
@@ -1096,6 +1098,26 @@
             </div>
 
             <div class="sync-section">
+                <div class="sync-section-title">Steamgrid Metadata</div>
+                <div class="sync-grid">
+                    <button class="sync-btn" onclick="syncSteamgrid('missing')">
+                        <div class="icon steamgrid">S</div>
+                        <div class="text">
+                            <span>Sync Missing Steamgrid Metadata</span>
+                            <small>Fetch Steamgrid data for unmatched games</small>
+                        </div>
+                    </button>
+                    <button class="sync-btn" onclick="syncSteamgrid('all')">
+                        <div class="icon steamgrid">S</div>
+                        <div class="text">
+                            <span>Resync All Steamgrid Metadata</span>
+                            <small>Re-fetch Steamgrid data for all games</small>
+                        </div>
+                    </button>
+                </div>
+            </div>
+
+            <div class="sync-section">
                 <div class="sync-section-title">IGDB Metadata</div>
                 <div class="sync-grid">
                     <button class="sync-btn" onclick="syncIgdb('missing')">
@@ -1242,6 +1264,31 @@
                                        placeholder="Your Steam API key">
                                 <div class="help-text">
                                     Get your API key at <a href="https://steamcommunity.com/dev/apikey" target="_blank">steamcommunity.com/dev/apikey</a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SteamGridDB -->
+                <div class="collapsible-section">
+                    <div class="collapsible-header" onclick="toggleCollapsible(this)">
+                        <div class="section-icon steamgrid">S</div>
+                        <div class="header-text">
+                            <div class="section-title">SteamGridDB</div>
+                            <div class="section-description">SteamGridDB custom images</div>
+                        </div>
+                        <div class="collapsible-toggle">▼</div>
+                    </div>
+                    <div class="collapsible-content">
+                        <div class="collapsible-content-inner">
+                            <div class="form-group">
+                                <label for="steamgrid_api_key"> API Key</label>
+                                <input type="password" id="steamgrid_api_key" name="steamgrid_api_key"
+                                       value="{{ settings.steamgrid_api_key }}"
+                                       placeholder="Your SteamGridDB API key">
+                                <div class="help-text">
+                                    Get your API key at <a href="https://www.steamgriddb.com/profile/preferences/api" target="_blank">sgdb/user/settings/api-keys</a>
                                 </div>
                             </div>
                         </div>
@@ -2007,6 +2054,36 @@ LOCAL_GAMES_DIR_2=/another/path/to/games</pre>
             btn.innerHTML = '<span class="spinner"></span> Starting...';
 
             fetch(`/api/sync/steam/${mode}/async`, {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                btn.disabled = false;
+                btn.innerHTML = originalContent;
+
+                if (data.success) {
+                    showStatus(data.message, 'success');
+                    checkActiveJobs();
+                    startJobPolling();
+                } else {
+                    showStatus(data.error || 'Failed to start sync', 'error');
+                }
+            })
+            .catch(error => {
+                btn.disabled = false;
+                btn.innerHTML = originalContent;
+                showStatus('Network error: ' + error.message, 'error');
+            });
+        }
+
+        // Sync SteamgridDB (async with job tracking)
+        function syncSteamgrid(mode) {
+            const btn = event.target.closest('.sync-btn');
+            btn.disabled = true;
+            const originalContent = btn.innerHTML;
+            btn.innerHTML = '<span class="spinner"></span> Starting...';
+
+            fetch(`/api/sync/steamgrid/${mode}/async`, {
                 method: 'POST'
             })
             .then(response => response.json())
