@@ -13,6 +13,9 @@ from ..utils.filters import PLAYTIME_LABELS
 
 router = APIRouter(tags=["Metadata"])
 
+class UpdateSteamRequest(BaseModel):
+    appid: Optional[int] = None
+
 
 class UpdateIgdbRequest(BaseModel):
     igdb_id: Optional[int] = None
@@ -123,6 +126,60 @@ def update_igdb(game_id: int, body: UpdateIgdbRequest, conn: sqlite3.Connection 
             "message": f"Synced with IGDB: {igdb_game.get('name')}",
             "igdb_name": igdb_game.get("name"),
             "igdb_id": igdb_game.get("id")
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch from IGDB: {str(e)}")
+
+
+@router.post("/api/game/{game_id}/steam")
+def update_steam(game_id: int, body: UpdateSteamRequest, conn: sqlite3.Connection = Depends(get_db)):
+    """Update Steam app ID for a game."""
+    # Import here to avoid circular imports
+    from ..services.steam_sync import sync_steam_by_appid, get_steam_store_name
+    from ..services.database_builder import update_average_rating
+
+    appid = body.appid
+
+    if appid is None:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT summary, cover_url, screenshots FROM games WHERE id = ?",
+            (game_id,),
+        )
+        row = cursor.fetchone()
+
+        cursor.execute(
+            """UPDATE games SET
+                steam_app_id = NULL,
+                critics_score = NULL,
+                summary = NULL,
+                screenshots = NULL,
+                steam_synced_at = NULL
+            WHERE id = ?""",
+            (game_id,),
+        )
+        conn.commit()
+        update_average_rating(conn, game_id)
+        return {"success": True, "message": "Steam data cleared"}
+
+    # Fetch data from Steam
+    try:
+        
+        game_name, _ = get_steam_store_name(appid)
+
+        sync_steam_by_appid(conn, game_id, appid)
+
+        conn.commit()
+        update_average_rating(conn, game_id)
+
+        return {
+            "success": True,
+            "message": f"Synced with Steam: {game_name}",
         }
 
     except ValueError as e:

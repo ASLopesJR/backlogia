@@ -1583,6 +1583,32 @@
                             </div>
 
                             <div class="settings-section">
+                                <h3>Steam Data</h3>
+                                <div class="igdb-settings">
+                                    {% if game.steam_app_id %}
+                                    <div class="igdb-current">
+                                        <span>Current App ID:</span>
+                                        <a href="https://store.steampowered.com/app/{{ game.steam_app_id }}" target="_blank" rel="noopener">{{ game.steam_app_id }}</a>
+                                    </div>
+                                    {% endif %}
+                                    <div class="igdb-input-group">
+                                        <input type="number" id="steam-id-input" class="igdb-input"
+                                               placeholder="Enter Steam AppID"
+                                               value="{{ game.steam_app_id or '' }}">
+                                        <button type="button" class="igdb-btn" onclick="syncSteam()">Sync</button>
+                                    </div>
+                                    {% if game.steam_app_id %}
+                                    <button type="button" class="igdb-btn clear" onclick="clearSteam()">Clear Steam Data</button>
+                                    {% endif %}
+                                    <div id="steam-status" class="igdb-status" style="display: none;"></div>
+                                    <p class="igdb-help">
+                                        Find the Steam AppID by searching on <a href="https://store.steampowered.com/search/?term={{ game.name|urlencode }}" target="_blank" rel="noopener">store.steampowered.com</a>.
+                                        The AppID is displayed in the URL of the game's page (e.g. https://store.steampowered.com/app/12345).
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div class="settings-section">
                                 <h3>IGDB Data</h3>
                                 <div class="igdb-settings">
                                     {% if game.igdb_id %}
@@ -1792,8 +1818,87 @@
             }
         });
 
-        // IGDB Sync Functions
+        // Steam Sync Functions
         const gameId = {{ game.id }};
+
+        function showSteamStatus(message, type) {
+            const statusEl = document.getElementById('steam-status');
+            statusEl.textContent = message;
+            statusEl.className = 'igdb-status ' + type;
+            statusEl.style.display = 'block';
+        }
+
+        function syncSteam() {
+            const input = document.getElementById('steam-id-input');
+            const appid = input.value.trim();
+
+            if (!appid) {
+                showSteamStatus('Please enter an AppID', 'error');
+                return;
+            }
+
+            const btn = event.target;
+            btn.disabled = true;
+            btn.textContent = 'Syncing...';
+            showSteamStatus('Fetching data from Steam...', 'loading');
+
+            fetch(`/api/game/${gameId}/steam`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ appid: appid })
+            })
+            .then(response => response.json())
+            .then(data => {
+                btn.disabled = false;
+                btn.textContent = 'Sync';
+
+                if (data.success) {
+                    showSteamStatus(data.message, 'success');
+                    // Reload page after a short delay to show updated data
+                    setTimeout(() => location.reload(), 1500);
+                } else {
+                    showSteamStatus(data.error || 'Failed to sync', 'error');
+                }
+            })
+            .catch(error => {
+                btn.disabled = false;
+                btn.textContent = 'Sync';
+                showSteamStatus('Network error: ' + error.message, 'error');
+            });
+        }
+
+        function clearSteam() {
+            if (!confirm('Are you sure you want to clear all Steam data for this game?')) {
+                return;
+            }
+
+            showSteamStatus('Clearing Steam data...', 'loading');
+
+            fetch(`/api/game/${gameId}/steam`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ appid: null })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showSteamStatus(data.message, 'success');
+                    setTimeout(() => location.reload(), 1500);
+                } else {
+                    showSteamStatus(data.error || 'Failed to clear data', 'error');
+                }
+            })
+            .catch(error => {
+                showSteamStatus('Network error: ' + error.message, 'error');
+            });
+        }
+
+
+        // IGDB Sync Functions
 
         function showStatus(message, type) {
             const statusEl = document.getElementById('igdb-status');
