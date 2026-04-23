@@ -35,6 +35,33 @@ def _rate_limited_request(url, params=None, interval=_MIN_REQUEST_INTERVAL):
     except requests.RequestException:
         return None
 
+def get_steam_store_name(appid):
+    """Fetch store info for a Steam game.
+
+    Returns a dict with:
+    - name: Steam store name
+    """
+    url = f"https://store.steampowered.com/api/appdetails?appids={appid}"
+
+    response = _rate_limited_request(url,interval=1.5)
+    if not response:
+        return None, "request_failed"
+    if response.status_code != 200:
+        return None, f"http_{response.status_code}"
+
+    try:
+        app_data = response.json().get(f"{appid}")
+        if not app_data or not app_data.get("success"):
+            return None, "not_found"
+        data = app_data.get("data")
+        if not data:
+            return None, "no_data"
+
+        return data.get("name"), None
+
+    except Exception as e:
+        return None, f"parse_error: {e}"
+
 def get_steam_store_info(appid):
     """Fetch store info for a Steam game.
 
@@ -60,7 +87,7 @@ def get_steam_store_info(appid):
         data = app_data.get("data")
         if not data:
             return None, "no_data"
-        summary = data.get("detailed_description")
+        summary = data.get("about_the_game")
         developers = data.get("developers")
         publishers = data.get("publishers")
         screenshots = [
@@ -316,6 +343,44 @@ def sync_steam_reviews(conn, force=False, max_workers=5, progress_callback=None)
                     failed += 1
 
     return updated, failed
+
+def sync_steam_by_appid(conn, game_id, appid):
+    cursor = conn.cursor()
+    reviews, reason = get_steam_review_score(appid)
+
+    if reviews:
+        cursor.execute(
+            """UPDATE games SET
+                critics_score = ?,
+                extra_data = json_set(COALESCE(extra_data, '{}'), '$.review_desc', ?, '$.total_reviews', ?),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?""",
+            (reviews["review_score"], reviews["review_desc"], reviews["total_reviews"], game_id),
+        )
+    else:
+        print(f"[steam review] appid={appid}: {reason}")
+
+    store_info, reason = get_steam_store_info(appid)
+    if store_info:
+        cursor.execute(
+            """UPDATE games SET
+                summary = COALESCE(?, summary),
+                developers = COALESCE(?, developers),
+                publishers = COALESCE(?, publishers),
+                release_date = COALESCE(?, release_date),
+                screenshots = COALESCE(?, screenshots),
+                steam_app_id = COALESCE(?, steam_app_id),
+                steam_synced_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?""",
+            (store_info["summary"],
+                json.dumps(store_info["developers"]) if store_info["developers"] else None,
+                json.dumps(store_info["publishers"]) if store_info["publishers"] else None,
+                store_info["release_date"],
+                json.dumps(store_info["screenshots"]) if store_info["screenshots"] else None,
+                appid,
+                game_id),
+        )
 
 def sync_steam(conn, force=False, max_workers=5, progress_callback=None):
     """Fetch Steam review scores for all Steam games in the database and update critics_score.
