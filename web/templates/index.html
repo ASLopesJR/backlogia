@@ -597,23 +597,25 @@
         .search-box {
             flex: 1;
             min-width: 200px;
+            position: relative;
         }
 
-        .search-box input {
+        .search-box input[name="search"] {
             width: 100%;
-            padding: 10px 16px;
+            padding: 10px 36px 10px 16px;
             border: none;
             border-radius: 20px;
             background: rgba(255, 255, 255, 0.1);
             color: #e4e4e4;
             font-size: 1rem;
+            transition: background 0.2s;
         }
 
-        .search-box input::placeholder {
+        .search-box input[name="search"]::placeholder {
             color: #888;
         }
 
-        .search-box input:focus {
+        .search-box input[name="search"]:focus {
             outline: none;
             background: rgba(255, 255, 255, 0.15);
         }
@@ -710,6 +712,16 @@
             aspect-ratio: 2/3;
             object-fit: cover;
             background: linear-gradient(135deg, #2a2a4a 0%, #1a1a3e 100%);
+            opacity: 0;
+            transition: opacity 0.25s ease;
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
+        }
+
+        .game-cover.loaded {
+            opacity: 1;
         }
 
         .game-cover-placeholder {
@@ -721,6 +733,7 @@
             justify-content: center;
             font-size: 3rem;
             color: #444;
+            position: relative;
         }
 
         .game-info {
@@ -1385,8 +1398,8 @@
             <div class="stats-container">
                 <div class="stats-summary">
                     <div class="summary-stat">
-                        <span class="value">{{ total_count }}</span>
-                        <span class="label">Games</span>
+                        <span class="value">{{ unique_count }}</span>
+                        <span class="label">{% if current_stores or current_genres or current_search or current_exclude_streaming or current_collection or current_protondb_tier or current_no_igdb or current_playtime_labels %}Matches{% else %}Games{% endif %}</span>
                     </div>
                 </div>
                 <div class="stats-divider"></div>
@@ -1434,7 +1447,7 @@
                     {% if current_protondb_tier %}<input type="hidden" name="protondb_tier" value="{{ current_protondb_tier }}">{% endif %}
                     {% if current_no_igdb %}<input type="hidden" name="no_igdb" value="true">{% endif %}
                     {% for lbl in current_playtime_labels %}<input type="hidden" name="playtime_label" value="{{ lbl }}">{% endfor %}
-                    <input type="text" name="search" placeholder="Search games..." value="{{ current_search }}">
+                    <input type="text" name="search" id="search-input" placeholder="Search games…" value="{{ current_search }}" oninput="liveFilterCards(this.value)" autocomplete="off">
                 </form>
             </div>
 
@@ -1624,9 +1637,10 @@
                 {% set cover_url = game.cover_url_override or game.cover_url or game.cover_image %}
                 <div class="game-cover-wrapper">
                     {% if cover_url %}
-                    <img src="{{ cover_url }}" alt="{{ game.name }}" class="game-cover" loading="lazy"
-                         onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
-                    <div class="game-cover-placeholder" style="display:none;">🎮</div>
+                    <div class="game-cover-placeholder">🎮</div>
+                    <img src="{{ cover_url }}" alt="{{ game.name }}" class="game-cover" loading="lazy" decoding="async"
+                         onload="this.classList.add('loaded')"
+                         onerror="this.remove()">
                     {% else %}
                     <div class="game-cover-placeholder">🎮</div>
                     {% endif %}
@@ -1828,6 +1842,16 @@
             const noIgdb = form.querySelector('input[name="no_igdb"]')?.value === 'true' || false;
             const playtimeLabels = Array.from(form.querySelectorAll('input[name="playtime_label"]')).map(i => i.value);
             saveFilterPreferences(stores, genres, search, sort, order, excludeStreaming, collection, protondbTier, noIgdb, playtimeLabels);
+        }
+
+        function liveFilterCards(value) {
+            const term = value.trim().toLowerCase();
+            const grid = document.getElementById('games-grid');
+            if (!grid) return;
+            grid.querySelectorAll('.game-card').forEach(card => {
+                const title = (card.querySelector('.game-title')?.textContent || '').toLowerCase();
+                card.style.display = (!term || title.includes(term)) ? '' : 'none';
+            });
         }
 
         function buildUrl(stores, genres, search, sort, order, excludeStreaming, collection, protondbTier, noIgdb, playtimeLabels) {

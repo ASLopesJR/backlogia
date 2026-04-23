@@ -195,9 +195,6 @@ def library(
     cursor.execute("SELECT COUNT(*) FROM games WHERE 1=1" + EXCLUDE_HIDDEN_FILTER)
     total_count = cursor.fetchone()[0]
 
-    # Count unique games (grouped)
-    unique_count = len(grouped_games)
-
     # Get hidden count
     cursor.execute("SELECT COUNT(*) FROM games WHERE hidden = 1")
     hidden_count = cursor.fetchone()[0]
@@ -239,7 +236,7 @@ def library(
             "store_counts": store_counts,
             "genre_counts": genre_counts,
             "total_count": total_count,
-            "unique_count": unique_count,
+            "unique_count": len(grouped_games),
             "hidden_count": hidden_count,
             "removed_count": removed_count,
             "current_stores": stores,
