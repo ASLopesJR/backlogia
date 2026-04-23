@@ -11,6 +11,7 @@ from ..config import DATABASE_PATH
 # Setting keys
 STEAM_ID = "steam_id"
 STEAM_API_KEY = "steam_api_key"
+STEAMGRID_API_KEY = "steamgrid_api_key"
 IGDB_CLIENT_ID = "igdb_client_id"
 IGDB_CLIENT_SECRET = "igdb_client_secret"
 ITCH_API_KEY = "itch_api_key"
@@ -31,6 +32,7 @@ IGDB_MATCH_THRESHOLD = "igdb_match_threshold"
 ENV_VAR_MAP = {
     STEAM_ID: "STEAM_ID",
     STEAM_API_KEY: "STEAM_API_KEY",
+    STEAMGRID_API_KEY: "STEAMGRID_API_KEY",
     IGDB_CLIENT_ID: "IGDB_CLIENT_ID",
     IGDB_CLIENT_SECRET: "IGDB_CLIENT_SECRET",
     ITCH_API_KEY: "ITCH_API_KEY",

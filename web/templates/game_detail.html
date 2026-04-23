@@ -1638,6 +1638,11 @@
                                 <h3>Cover Art</h3>
                                 <div class="igdb-settings">
                                     <div class="igdb-input-group">
+                                    <button type="button" class="igdb-btn" onclick="fetchSgdbOverride()">Get From SteamGridDB</button>
+                                    <div id="cover-override-status-steamgrid" class="igdb-status" style="display: none;"></div>
+                                </div>
+                                <div class="igdb-settings">
+                                    <div class="igdb-input-group">
                                         <input type="url" id="cover-override-input" class="igdb-input"
                                                placeholder="Enter custom cover image URL"
                                                value="{{ game.cover_url_override or '' }}">
@@ -2022,6 +2027,34 @@
             .catch(error => {
                 btn.disabled = false;
                 btn.textContent = 'Save';
+                showCoverStatus('Network error: ' + error.message, 'error');
+            });
+        }
+
+        function fetchSgdbOverride() {
+            const btn = event.target;
+            btn.disabled = true;
+            btn.textContent = 'Fetching...';
+            showCoverStatus('Fetching SteamGridDB cover...', 'loading');
+
+            fetch(`/api/game/${gameId}/cover-override-sgdb`, {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                btn.disabled = false;
+                btn.textContent = 'Get From SteamGridDB';
+
+                if (data.success) {
+                    showCoverStatus('Cover URL saved', 'success');
+                    setTimeout(() => location.reload(), 1500);
+                } else {
+                    showCoverStatus(data.error || 'Failed to save', 'error');
+                }
+            })
+            .catch(error => {
+                btn.disabled = false;
+                btn.textContent = 'Get From SteamGridDB';
                 showCoverStatus('Network error: ' + error.message, 'error');
             });
         }
