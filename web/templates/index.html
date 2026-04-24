@@ -1942,7 +1942,7 @@
                     <button class="card-edit-btn" onclick="handleCardEditClick(event, this)" title="Edit metadata">✏</button>
                     <div class="game-cover-wrapper">
                         <div class="game-cover-placeholder">🎮</div>
-                        ${coverUrl ? `<img src="${coverUrl}" alt="${primary.name}" class="game-cover loaded" loading="lazy" decoding="async">` : ''}
+                        ${coverUrl ? `<img src="${coverUrl}" alt="${primary.name}" class="game-cover" loading="lazy" decoding="async" onload="this.classList.add('loaded')">` : ''}
                         ${game.is_streaming ? '<span class="streaming-pill">Streaming</span>' : ''}
                     </div>
                     <div class="game-info">
