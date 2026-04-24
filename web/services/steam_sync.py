@@ -68,6 +68,7 @@ def get_steam_store_info(appid):
     Returns a dict with:
     - screenshots: Steam store screenshots (max 5)
     - summary: text description 
+    - description: detailed description
     - developers: developers list
     - publishers: publishers list
     - release_date: release date
@@ -87,7 +88,8 @@ def get_steam_store_info(appid):
         data = app_data.get("data")
         if not data:
             return None, "no_data"
-        summary = data.get("about_the_game")
+        description = data.get("about_the_game")
+        summary = data.get("short_description")
         developers = data.get("developers")
         publishers = data.get("publishers")
         screenshots = [
@@ -107,6 +109,7 @@ def get_steam_store_info(appid):
 
         return {
             "summary": summary,
+            "description": description,
             "developers": developers,
             "publishers": publishers,
             "release_date": release_date,
@@ -223,6 +226,7 @@ def sync_steam_store_info(conn, force=False, max_workers=5, progress_callback=No
                     thread_conn.execute(
                         """UPDATE games SET
                             summary = COALESCE(?, summary),
+                            description = COALESCE(?, description),
                             developers = COALESCE(?, developers),
                             publishers = COALESCE(?, publishers),
                             release_date = COALESCE(?, release_date),
@@ -231,6 +235,7 @@ def sync_steam_store_info(conn, force=False, max_workers=5, progress_callback=No
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?""",
                         (store_info["summary"],
+                         store_info["description"],
                          json.dumps(store_info["developers"]) if store_info["developers"] else None,
                          json.dumps(store_info["publishers"]) if store_info["publishers"] else None,
                          store_info["release_date"],
@@ -365,6 +370,7 @@ def sync_steam_by_appid(conn, game_id, appid):
         cursor.execute(
             """UPDATE games SET
                 summary = COALESCE(?, summary),
+                description = COALESCE(?, description),
                 developers = COALESCE(?, developers),
                 publishers = COALESCE(?, publishers),
                 release_date = COALESCE(?, release_date),
@@ -374,6 +380,7 @@ def sync_steam_by_appid(conn, game_id, appid):
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?""",
             (store_info["summary"],
+                store_info["description"],
                 json.dumps(store_info["developers"]) if store_info["developers"] else None,
                 json.dumps(store_info["publishers"]) if store_info["publishers"] else None,
                 store_info["release_date"],
