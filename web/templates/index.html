@@ -17,8 +17,13 @@
             box-sizing: border-box;
         }
 
+        html {
+            background-color: #1a1a2e; /* Set html background to match theme */
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background-color: #1a1a2e;
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
             min-height: 100vh;
             color: #e4e4e4;
@@ -36,6 +41,11 @@
             top: 0;
             z-index: 100;
             backdrop-filter: blur(10px);
+        }
+
+        body.is-scrolling .top-nav,
+        body.is-scrolling .action-bar {
+            backdrop-filter: none !important;
         }
 
         .nav-brand {
@@ -639,25 +649,28 @@
             background: #1a1a2e;
             color: #e4e4e4;
         }
+.games-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 20px;
+    position: relative;
+}
 
-        .games-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            gap: 20px;
-        }
+.games-grid.virtualized {
+    display: block;
+}
 
-        /* Small box art */
+.games-grid.virtualized .game-card {
+    position: absolute;
+    width: var(--card-width);
+    height: var(--card-height);
+    margin: 0 !important;
+    will-change: transform;
+}
+
         .games-grid.size-small {
             grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
             gap: 15px;
-        }
-
-        .games-grid.size-small .game-info {
-            padding: 10px;
-        }
-
-        .games-grid.size-small .game-title {
-            font-size: 0.8rem;
         }
 
         .games-grid.size-small .game-cover-placeholder {
@@ -689,10 +702,11 @@
         }
 
         .game-card {
+            display: block; /* Ensure height is respected even if not a grid item */
             background: rgba(255, 255, 255, 0.05);
             border-radius: 12px;
             overflow: hidden;
-            transition: transform 0.2s, box-shadow 0.2s;
+            transition: box-shadow 0.2s; /* Only animate shadow, not transform */
             cursor: pointer;
             text-decoration: none;
             color: inherit;
@@ -701,23 +715,31 @@
         .game-card:hover {
             transform: translateY(-5px);
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            transition: transform 0.2s, box-shadow 0.2s; /* Enable transform transition only on hover */
+            will-change: transform;
+        }
+
+        .game-card.hidden {
+            display: none !important;
         }
 
         .game-cover-wrapper {
             position: relative;
+            width: 100%;
+            aspect-ratio: 2/3;
+            background: linear-gradient(135deg, #2a2a4a 0%, #1a1a3e 100%);
+            overflow: hidden;
         }
 
         .game-cover {
             width: 100%;
-            aspect-ratio: 2/3;
+            height: 100%;
             object-fit: cover;
-            background: linear-gradient(135deg, #2a2a4a 0%, #1a1a3e 100%);
             opacity: 0;
             transition: opacity 0.25s ease;
             position: absolute;
             top: 0;
             left: 0;
-            height: 100%;
         }
 
         .game-cover.loaded {
@@ -726,14 +748,12 @@
 
         .game-cover-placeholder {
             width: 100%;
-            aspect-ratio: 2/3;
-            background: linear-gradient(135deg, #2a2a4a 0%, #1a1a3e 100%);
+            height: 100%;
             display: flex;
             align-items: center;
             justify-content: center;
             font-size: 3rem;
             color: #444;
-            position: relative;
         }
 
         .game-info {
@@ -1737,17 +1757,249 @@
     </div>
 
     <script>
+        // Phase 3: Core Utilities & State
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+
+        window.selectedGames = new Set();
+        let selectMode = false;
+
+        // Phase 3: Data & Virtualization
+        {% set store_icons_map = {'steam': 'steam-100.png', 'epic': 'epic-100.png', 'gog': 'gog-48.png', 'itch': 'itch-90.png', 'humble': 'humble-96.png', 'battlenet': 'battlenet-100.png', 'amazon': 'amazon-120.png', 'ea': 'ea-256.png', 'xbox': 'xbox-100.png', 'ubisoft': 'ubisoft-96.png', 'local': 'local-96.png'} %}
+        window.allGamesData = {{ games | tojson | safe }};
+        window.filteredGames = [...window.allGamesData];
+        window.storeIconsMap = {{ store_icons_map | tojson | safe }};
+
+        class VirtualGrid {
+            constructor(containerId) {
+                this.container = document.getElementById(containerId);
+                if (!this.container) return;
+
+                this.data = window.filteredGames;
+                this.columns = 0;
+                this.cardHeight = 0;
+                this.cardWidth = 0;
+                this.gap = 20;
+                this.visibleCards = new Map(); // index -> element
+                this.pool = [];
+                
+                this.init();
+            }
+
+            init() {
+                // 1. Prepare container for virtualization
+                this.container.classList.add('virtualized');
+                this.container.innerHTML = ''; 
+                
+                // 2. Measure and set initial height/layout
+                this.calculateLayout();
+                
+                // 3. Setup observers for future changes
+                const resizeObserver = new ResizeObserver(debounce(() => {
+                    this.calculateLayout();
+                }, 150));
+                resizeObserver.observe(this.container);
+
+                window.addEventListener('scroll', () => this.update(), { passive: true });
+                
+                // 4. Initial render
+                this.update();
+            }
+
+            setData(newData) {
+                this.data = newData;
+                this.calculateLayout();
+            }
+
+            calculateLayout() {
+                const containerWidth = this.container.clientWidth;
+                if (containerWidth === 0) return;
+
+                // 1. Determine columns based on current size class
+                let minWidth = 200;
+                if (this.container.classList.contains('size-small')) minWidth = 140;
+                else if (this.container.classList.contains('size-large')) minWidth = 280;
+                
+                const computedStyle = window.getComputedStyle(this.container);
+                this.gap = parseInt(computedStyle.gap) || 20;
+
+                this.columns = Math.floor((containerWidth + this.gap) / (minWidth + this.gap)) || 1;
+                this.cardWidth = (containerWidth - (this.columns - 1) * this.gap) / this.columns;
+
+                // 2. Measure a dummy card with the calculated width to get its natural height
+                const dummy = document.createElement('div');
+                dummy.className = 'game-card ' + (this.container.classList.contains('size-small') ? 'size-small' : (this.container.classList.contains('size-large') ? 'size-large' : 'size-medium'));
+                dummy.style.width = this.cardWidth + 'px';
+                dummy.style.position = 'fixed';
+                dummy.style.visibility = 'hidden';
+                dummy.style.left = '-9999px';
+                dummy.innerHTML = `
+                    <div class="game-cover-wrapper"><div class="game-cover-placeholder">🎮</div></div>
+                    <div class="game-info">
+                        <div class="game-title">Measurement Card Name</div>
+                        <div class="game-meta">
+                            <div class="store-icons"><img src="/static/images/steam-100.png" class="store-icon"></div>
+                            <div class="ratings-bar"><span class="rating total">99</span></div>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(dummy);
+                this.cardHeight = (dummy.offsetHeight || 380) + 2; 
+                document.body.removeChild(dummy);
+
+                // Update total grid height and CSS variables
+                const rows = Math.ceil(this.data.length / this.columns);
+                this.container.style.height = `${rows * (this.cardHeight + this.gap)}px`;
+                this.container.style.setProperty('--card-width', `${this.cardWidth}px`);
+                this.container.style.setProperty('--card-height', `${this.cardHeight}px`);
+                
+                this.update(true);
+            }
+
+            update(force = false) {
+                if (!this.cardHeight || !this.columns) return;
+
+                const scrollTop = window.scrollY;
+                const viewportHeight = window.innerHeight;
+                // Dynamically calculate containerTop to handle layout shifts above the grid
+                const containerTop = this.container.getBoundingClientRect().top + scrollTop;
+                
+                const startRow = Math.max(0, Math.floor((scrollTop - containerTop - 1000) / (this.cardHeight + this.gap)));
+                const endRow = Math.ceil((scrollTop - containerTop + viewportHeight + 1000) / (this.cardHeight + this.gap));
+                
+                const startIndex = startRow * this.columns;
+                const endIndex = Math.min(this.data.length - 1, (endRow + 1) * this.columns - 1);
+
+                if (force) {
+                    this.visibleCards.forEach(el => this.recycle(el));
+                    this.visibleCards.clear();
+                }
+
+                // Remove cards no longer visible
+                for (const [index, el] of this.visibleCards) {
+                    if (index < startIndex || index > endIndex) {
+                        this.recycle(el);
+                        this.visibleCards.delete(index);
+                    }
+                }
+
+                // Add newly visible cards
+                for (let i = startIndex; i <= endIndex; i++) {
+                    if (!this.visibleCards.has(i)) {
+                        const el = this.getCard(i);
+                        this.positionCard(el, i);
+                        this.visibleCards.set(i, el);
+                    }
+                }
+            }
+
+            recycle(el) {
+                el.style.display = 'none';
+                this.pool.push(el);
+            }
+
+            getCard(index) {
+                let el = this.pool.pop();
+                if (!el) {
+                    el = document.createElement('a');
+                    el.className = 'game-card';
+                    this.container.appendChild(el);
+                }
+                
+                const game = this.data[index];
+                const primary = game.primary;
+                const gameId = game.game_ids[0];
+                
+                el.href = `/game/${gameId}`;
+                el.style.display = '';
+                el.dataset.gameIds = game.game_ids.join(',');
+                el.className = `game-card ${window.selectedGames.has(String(gameId)) ? 'selected' : ''}`;
+                
+                const coverUrl = primary.cover_url_override || primary.cover_url || primary.cover_image;
+                const ratingsHtml = (primary.total_rating || primary.igdb_rating || primary.aggregated_rating) ? `
+                    <div class="ratings-bar" title="Total | User | Critic">
+                        ${primary.total_rating ? `<span class="rating total">${Math.round(primary.total_rating)}</span>` : ''}
+                        ${primary.igdb_rating ? `<span class="rating user">${Math.round(primary.igdb_rating)}</span>` : ''}
+                        ${primary.aggregated_rating ? `<span class="rating critic">${Math.round(primary.aggregated_rating)}</span>` : ''}
+                    </div>
+                ` : '';
+
+                const storeIconsHtml = game.stores.map(store => `
+                    <img src="/static/images/${window.storeIconsMap[store] || 'steam-26.png'}" alt="${store}" class="store-icon">
+                `).join('');
+
+                el.innerHTML = `
+                    <div class="game-checkbox ${window.selectedGames.has(String(gameId)) ? 'checked' : ''}" onclick="toggleGameSelection(event, this)"></div>
+                    <button class="card-edit-btn" onclick="handleCardEditClick(event, this)" title="Edit metadata">✏</button>
+                    <div class="game-cover-wrapper">
+                        <div class="game-cover-placeholder">🎮</div>
+                        ${coverUrl ? `<img src="${coverUrl}" alt="${primary.name}" class="game-cover loaded" loading="lazy" decoding="async">` : ''}
+                        ${game.is_streaming ? '<span class="streaming-pill">Streaming</span>' : ''}
+                    </div>
+                    <div class="game-info">
+                        <div class="game-title">${primary.name || 'Unknown Game'}</div>
+                        <div class="game-meta">
+                            <div class="store-icons" title="Owned on: ${game.stores.join(', ')}">
+                                ${storeIconsHtml}
+                            </div>
+                            ${ratingsHtml}
+                        </div>
+                    </div>
+                `;
+                
+                return el;
+            }
+
+            positionCard(el, index) {
+                const row = Math.floor(index / this.columns);
+                const col = index % this.columns;
+                const x = col * (this.cardWidth + this.gap);
+                const y = row * (this.cardHeight + this.gap);
+                el.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+            }
+        }
+
         function setGridSize(size) {
             const grid = document.getElementById('games-grid');
             if (!grid) return;
             grid.classList.remove('size-small', 'size-medium', 'size-large');
             grid.classList.add('size-' + size);
+            localStorage.setItem('gridSize', size);
+            if (window.virtualGrid) {
+                window.virtualGrid.calculateLayout();
+            }
+        }
+
+        // Force manual scroll restoration immediately
+        if ('scrollRestoration' in history) {
+            history.scrollRestoration = 'manual';
+        }
+        
+        // Instant attempt before DOM fully loads
+        const initialSavedScrollPos = sessionStorage.getItem('backlogia_scroll_pos');
+        if (initialSavedScrollPos) {
+            window.scrollTo(0, parseInt(initialSavedScrollPos));
         }
 
         // Load saved preference on page load
         document.addEventListener('DOMContentLoaded', function() {
             const savedSize = localStorage.getItem('gridSize') || 'medium';
             setGridSize(savedSize);
+
+            // Phase 3: Initialize Virtual Grid
+            window.virtualGrid = new VirtualGrid('games-grid');
+            
+            // Ensure minimum height so the browser knows the page is scrollable
+            window.virtualGrid.container.style.minHeight = '2000px';
 
             // Restore filter/sort preferences from localStorage if no URL params
             restoreFilterPreferences();
@@ -1761,6 +2013,32 @@
                     if (headerStat) headerStat.classList.toggle('active', this.checked);
                 });
             });
+
+            // Robust scroll restoration
+            const savedScrollPos = sessionStorage.getItem('backlogia_scroll_pos');
+            if (savedScrollPos) {
+                let attempts = 0;
+                const checkAndScroll = () => {
+                    if (window.virtualGrid && window.virtualGrid.container.offsetHeight > 100) {
+                        window.scrollTo({
+                            top: parseInt(savedScrollPos),
+                            behavior: 'auto'
+                        });
+                        sessionStorage.removeItem('backlogia_scroll_pos');
+                    } else if (attempts < 20) {
+                        attempts++;
+                        setTimeout(checkAndScroll, 50);
+                    } else {
+                        sessionStorage.removeItem('backlogia_scroll_pos');
+                    }
+                };
+                checkAndScroll();
+            }
+        });
+
+        // Save scroll position
+        window.addEventListener('beforeunload', () => {
+            sessionStorage.setItem('backlogia_scroll_pos', window.scrollY);
         });
 
         // Get current filter state from the panel
@@ -1844,15 +2122,41 @@
             saveFilterPreferences(stores, genres, search, sort, order, excludeStreaming, collection, protondbTier, noIgdb, playtimeLabels);
         }
 
-        function liveFilterCards(value) {
-            const term = value.trim().toLowerCase();
-            const grid = document.getElementById('games-grid');
-            if (!grid) return;
-            grid.querySelectorAll('.game-card').forEach(card => {
-                const title = (card.querySelector('.game-title')?.textContent || '').toLowerCase();
-                card.style.display = (!term || title.includes(term)) ? '' : 'none';
-            });
+        // Debounce utility
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
         }
+
+        const liveFilterCards = debounce(function(value) {
+            const term = value.trim().toLowerCase();
+            window.filteredGames = window.allGamesData.filter(game => {
+                const name = (game.primary.name || '').toLowerCase();
+                return !term || name.includes(term);
+            });
+            if (window.virtualGrid) {
+                window.virtualGrid.setData(window.filteredGames);
+            }
+        }, 150);
+
+        // Performance: Disable backdrop-filter while scrolling
+        let isScrolling;
+        window.addEventListener('scroll', function() {
+            window.clearTimeout(isScrolling);
+            if (!document.body.classList.contains('is-scrolling')) {
+                document.body.classList.add('is-scrolling');
+            }
+            isScrolling = setTimeout(function() {
+                document.body.classList.remove('is-scrolling');
+            }, 150);
+        }, { passive: true });
 
         function buildUrl(stores, genres, search, sort, order, excludeStreaming, collection, protondbTier, noIgdb, playtimeLabels) {
             const params = new URLSearchParams();
@@ -1966,9 +2270,6 @@
         }
 
         // Multi-select functionality
-        let selectMode = false;
-        let selectedGames = new Set();
-
         function toggleSelectMode() {
             selectMode = !selectMode;
             const grid = document.getElementById('games-grid');
@@ -1997,11 +2298,11 @@
             if (checkbox.classList.contains('checked')) {
                 checkbox.classList.remove('checked');
                 card.classList.remove('selected');
-                gameIds.forEach(id => selectedGames.delete(id));
+                gameIds.forEach(id => window.selectedGames.delete(id));
             } else {
                 checkbox.classList.add('checked');
                 card.classList.add('selected');
-                gameIds.forEach(id => selectedGames.add(id));
+                gameIds.forEach(id => window.selectedGames.add(id));
             }
 
             updateSelectionCount();
@@ -2010,7 +2311,7 @@
         function updateSelectionCount() {
             const countEl = document.getElementById('selection-count');
             const actionBar = document.getElementById('action-bar');
-            const count = document.querySelectorAll('.game-card.selected').length;
+            const count = window.selectedGames.size; // Phase 3: Use window.selectedGames
 
             countEl.textContent = count;
 
@@ -2022,30 +2323,28 @@
         }
 
         function clearSelection() {
-            selectedGames.clear();
-            document.querySelectorAll('.game-card.selected').forEach(card => {
-                card.classList.remove('selected');
-                card.querySelector('.game-checkbox').classList.remove('checked');
-            });
+            window.selectedGames.clear();
+            if (window.virtualGrid) {
+                window.virtualGrid.update(true);
+            }
             updateSelectionCount();
         }
 
         function selectAllGames() {
-            document.querySelectorAll('.game-card').forEach(card => {
-                const gameIds = card.dataset.gameIds;
-                if (gameIds && !card.classList.contains('selected')) {
-                    card.classList.add('selected');
-                    card.querySelector('.game-checkbox')?.classList.add('checked');
-                    gameIds.split(',').forEach(id => selectedGames.add(id));
-                }
+            // Phase 3: Add all filtered games to selection
+            window.filteredGames.forEach(game => {
+                game.game_ids.forEach(id => window.selectedGames.add(String(id)));
             });
+            if (window.virtualGrid) {
+                window.virtualGrid.update(true);
+            }
             updateSelectionCount();
         }
 
         async function bulkAction(action) {
-            if (selectedGames.size === 0) return;
+            if (window.selectedGames.size === 0) return;
 
-            const gameIds = Array.from(selectedGames).map(id => parseInt(id));
+            const gameIds = Array.from(window.selectedGames).map(id => parseInt(id));
             const actionBtn = document.querySelector(`.action-btn.${action}`);
             const originalText = actionBtn.textContent;
 
@@ -2064,18 +2363,22 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    // Remove selected cards from the grid (they're now hidden/marked)
-                    document.querySelectorAll('.game-card.selected').forEach(card => {
-                        card.style.transition = 'opacity 0.3s, transform 0.3s';
-                        card.style.opacity = '0';
-                        card.style.transform = 'scale(0.8)';
-                        setTimeout(() => card.remove(), 300);
-                    });
+                    // Phase 3: Update local data and refresh grid
+                    window.allGamesData = window.allGamesData.filter(g => 
+                        !g.game_ids.some(id => gameIds.includes(id))
+                    );
+                    window.filteredGames = window.filteredGames.filter(g => 
+                        !g.game_ids.some(id => gameIds.includes(id))
+                    );
+                    
+                    if (window.virtualGrid) {
+                        window.virtualGrid.setData(window.filteredGames);
+                    }
 
                     clearSelection();
                     toggleSelectMode();
 
-                    // Update stats after a short delay
+                    // Reload stats (optional, but keep for now as requested)
                     setTimeout(() => {
                         location.reload();
                     }, 500);
@@ -2091,14 +2394,14 @@
         }
 
         async function bulkDelete() {
-            if (selectedGames.size === 0) return;
+            if (window.selectedGames.size === 0) return;
 
-            const count = selectedGames.size;
+            const count = window.selectedGames.size;
             if (!confirm(`Are you sure you want to delete ${count} game${count > 1 ? 's' : ''} from your library?\n\nThis will remove them from all collections. They will be re-added on next sync if you still own them.`)) {
                 return;
             }
 
-            const gameIds = Array.from(selectedGames).map(id => parseInt(id));
+            const gameIds = Array.from(window.selectedGames).map(id => parseInt(id));
             const actionBtn = document.querySelector('.action-btn.delete');
             const originalText = actionBtn.textContent;
 
@@ -2117,18 +2420,22 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    // Remove selected cards from the grid
-                    document.querySelectorAll('.game-card.selected').forEach(card => {
-                        card.style.transition = 'opacity 0.3s, transform 0.3s';
-                        card.style.opacity = '0';
-                        card.style.transform = 'scale(0.8)';
-                        setTimeout(() => card.remove(), 300);
-                    });
+                    // Phase 3: Update local data and refresh grid
+                    window.allGamesData = window.allGamesData.filter(g => 
+                        !g.game_ids.some(id => gameIds.includes(id))
+                    );
+                    window.filteredGames = window.filteredGames.filter(g => 
+                        !g.game_ids.some(id => gameIds.includes(id))
+                    );
+                    
+                    if (window.virtualGrid) {
+                        window.virtualGrid.setData(window.filteredGames);
+                    }
 
                     clearSelection();
                     toggleSelectMode();
 
-                    // Update stats after a short delay
+                    // Reload stats
                     setTimeout(() => {
                         location.reload();
                     }, 500);

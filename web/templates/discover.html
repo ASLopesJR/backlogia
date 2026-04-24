@@ -1916,12 +1916,13 @@
             const genres = game.genres || [];
             const cover = game.cover_url || game.cover_image || '';
             const bg = screenshots[0] || cover;
-            const desc = game.summary || game.description || 'No description available.';
+            const summary = game.summary || game.description || 'No description available.';
+            const desc = game.description || game.summary || 'No description available.';
 
             document.getElementById('expanded-bg').src = bg ? bg.replace('t_screenshot_big', 't_1080p') : '';
             document.getElementById('expanded-cover').src = cover;
             document.getElementById('expanded-title').textContent = game.name;
-            document.getElementById('expanded-description').textContent = desc;
+            document.getElementById('expanded-description').innerHTML = desc;
             document.getElementById('expanded-link').href = '/game/' + game.id;
 
             // Ratings

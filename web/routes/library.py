@@ -136,6 +136,9 @@ def library(
             ) {order_dir} NULLS LAST"""
         elif sort in ["critics_score", "total_rating", "igdb_rating", "aggregated_rating", "average_rating", "metacritic_score", "metacritic_user_score"]:
             query += f" ORDER BY {sort} {order_dir} NULLS LAST"
+        elif sort == "name":
+            # If it starts with 'The ', sort by everything after the space (index 5 onwards)
+            query += f" ORDER BY CASE WHEN name LIKE 'The %' THEN SUBSTR(name, 5) ELSE name END COLLATE NOCASE {order_dir}"
         else:
             query += f" ORDER BY {sort} COLLATE NOCASE {order_dir}"
 
@@ -182,7 +185,10 @@ def library(
     def get_sort_key(g):
         val = effective_sort_value(g["primary"], sort)
         if isinstance(val, str):
-            return val.lower()
+            val = val.lower()
+            if sort == "name" and val.startswith("the "):
+                return val[4:]
+            return val
         return val
 
     with_values.sort(key=get_sort_key, reverse=reverse)
