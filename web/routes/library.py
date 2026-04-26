@@ -36,6 +36,7 @@ def library(
     collection: int = 0,
     protondb_tier: str = "",
     no_igdb: bool = False,
+    no_steam: bool = False,
     playtime_label: list[str] = Query(default=[]),
     conn: sqlite3.Connection = Depends(get_db)
 ):
@@ -80,6 +81,10 @@ def library(
     # No IGDB data filter
     if no_igdb:
         query += " AND (igdb_id IS NULL OR igdb_id = 0)"
+
+    # No Steam data filter
+    if no_steam:
+        query += " AND (steam_app_id IS NULL OR steam_app_id = 0)"
 
     # Playtime label filter – supports multiple values; unplayed/tried/played
     # also match games with no explicit label using playtime_hours ranges.
@@ -254,6 +259,7 @@ def library(
             "current_collection": collection,
             "current_protondb_tier": protondb_tier,
             "current_no_igdb": no_igdb,
+            "current_no_steam": no_steam,
             "current_playtime_labels": playtime_label,
             "collections": collections,
             "available_sorts": available_sorts,
