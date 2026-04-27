@@ -6,6 +6,8 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -292,12 +294,38 @@ def game_detail(request: Request, game_id: int, conn: sqlite3.Connection = Depen
     else:
         related_games = [game_dict]
 
+    # High-priority list
+    suffixes = [
+        "Game of the Year Edition", 
+        "Director's Cut", 
+        "Collector's Edition", 
+        "GOTY", 
+        "CE"
+    ]
+
+    numeric_anniversary = r"\d+(?:th|st|rd|nd)?\s+(?:Anniversary|Year)(?:\s+Edition)?"
+    # CHANGE: Removed the () around [a-zA-Z]+ so it doesn't create a sub-group
+    # We use (?:...) for the Edition/Anniversary part to keep it clean.
+    strict_generic = r"[a-zA-Z']+\s+(?:Edition|Anniversary)"
+
+    # The outer () here will now be Group 1 and contain the WHOLE suffix.
+    combined_pattern = r"\s*[:\-\u2013\u2014]?\s*\b(" + \
+                   numeric_anniversary + "|" + \
+                   "|".join(map(re.escape, suffixes)) + "|" + \
+                   strict_generic + r")\s*$"
+
+    def get_suffix(game_name):
+        match = re.search(combined_pattern, game_name.strip(), re.IGNORECASE)
+        # This will now return "Complete Edition" or "GOTY" correctly
+        return match.group(1).strip() if match else None
+
     # Build store info with URLs for each copy
     store_info = []
     for g in related_games:
         store_url = get_store_url(g["store"], g["store_id"], g.get("extra_data"))
         store_info.append({
             "store": g["store"],
+            "suffix": f" - {get_suffix(g['name'])}" if get_suffix(g["name"]) else "",
             "store_id": g["store_id"],
             "store_url": store_url,
             "game_id": g["id"],

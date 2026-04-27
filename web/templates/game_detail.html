@@ -1372,7 +1372,7 @@
                         <a href="{{ info.store_url }}" target="_blank" rel="noopener" class="store-link">
                             <img src="/static/images/{{ store_icons.get(info.store, 'steam-24.png') }}" alt="{{ info.store }}" class="store-link-icon">
                             <div class="store-link-info">
-                                <div class="store-link-name">{{ info.store }}</div>
+                                <div class="store-link-name">{{ info.store }}{{info.suffix}}</div>
                                 <div class="store-link-meta">
                                     {% if info.playtime_hours %}{{ info.playtime_hours|round(1) }} hrs played{% else %}View in store{% endif %}
                                 </div>
