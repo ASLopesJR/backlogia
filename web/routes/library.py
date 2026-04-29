@@ -131,13 +131,16 @@ def library(
     # Sorting - detect which columns actually exist in the DB
     cursor.execute("PRAGMA table_info(games)")
     existing_columns = {row[1] for row in cursor.fetchall()}
-    valid_sorts = ["name", "store", "playtime_hours", "critics_score", "release_date", "total_rating", "igdb_rating", "aggregated_rating", "average_rating", "metacritic_score", "metacritic_user_score"]
+    valid_sorts = ["name", "store", "playtime_hours", "critics_score", "release_date", "total_rating", "igdb_rating", "aggregated_rating", "average_rating", "metacritic_score", "metacritic_user_score", "igdb_release_date"]
     available_sorts = [s for s in valid_sorts if s in existing_columns]
+    print(available_sorts)
     if sort not in available_sorts:
         sort = "name"
     if sort in available_sorts:
         order_dir = "DESC" if order == "desc" else "ASC"
-        if sort == "playtime_hours":
+        if sort == "igdb_release_date":
+            query += f" ORDER BY igdb_release_date {order_dir} NULLS LAST"
+        elif sort == "playtime_hours":
             # Respect manual playtime_label when playtime_hours is NULL:
             # COALESCE tries hours first, then falls back to a sentinel derived from the label.
             query += f""" ORDER BY COALESCE(
