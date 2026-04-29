@@ -35,11 +35,12 @@ def library(
     sort: str = "name",
     order: str = "asc",
     exclude_streaming: bool = False,
-    collection: int = 0,
     protondb_tier: str = "",
     no_igdb: bool = False,
     no_steam: bool = False,
     playtime_label: list[str] = Query(default=[]),
+    collections_include: list[int] = Query(default=[]),
+    collections_exclude: list[int] = Query(default=[]),
     conn: sqlite3.Connection = Depends(get_db)
 ):
     """Library page - list all games."""
@@ -67,9 +68,18 @@ def library(
         params.append(f"%{escape_like(search)}%")
 
     # Collection filter
-    if collection:
-        query += " AND id IN (SELECT game_id FROM collection_games WHERE collection_id = ?)"
-        params.append(collection)
+    included_collections = [ci for ci in collections_include]
+    excluded_collections = [ce for ce in collections_exclude]
+    if included_collections:
+        # Creates: AND id IN (SELECT game_id FROM collection_games WHERE collection_id IN (?, ?))
+        placeholders = ', '.join(['?'] * len(included_collections))
+        query += f" AND id IN (SELECT game_id FROM collection_games WHERE collection_id IN ({placeholders}))"
+        params.extend(included_collections)
+    if excluded_collections:
+        for c in excluded_collections:
+            query += " AND id NOT IN (SELECT game_id FROM collection_games WHERE collection_id = ?)"
+            params.append(c)
+
 
     # ProtonDB tier filter (hierarchy: platinum > gold > silver > bronze)
     protondb_hierarchy = ["platinum", "gold", "silver", "bronze"]
@@ -258,11 +268,12 @@ def library(
             "current_sort": sort,
             "current_order": order,
             "current_exclude_streaming": exclude_streaming,
-            "current_collection": collection,
             "current_protondb_tier": protondb_tier,
             "current_no_igdb": no_igdb,
             "current_no_steam": no_steam,
             "current_playtime_labels": playtime_label,
+            "current_collections_include": collections_include,
+            "current_collections_exclude": collections_exclude,
             "collections": collections,
             "available_sorts": available_sorts,
             "parse_json": parse_json_field
