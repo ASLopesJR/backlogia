@@ -22,6 +22,7 @@ Configure all store connections through the **Settings** page in Backlogia. Each
 | **EA** | Bearer token via bookmarklet (instructions in Settings) |
 | **Xbox / Game Pass** | XSTS token via bookmarklet or browser DevTools (instructions in Settings). Game Pass catalog syncs without authentication. |
 | **Ubisoft** | Bookmarklet import from account.ubisoft.com (instructions in Settings) |
+| **SteamGridDB** | [SteamGridDB API Key](https://www.steamgriddb.com/profile/preferences/api) for custom cover/hero artwork sync |
 | **Local Folder** | Configure paths in `.env` file (see [Local Games](#local-games) below) |
 
 ---
@@ -120,3 +121,17 @@ Available labels:
 | `Abandoned` | Started but gave up | *(explicit only)* |
 
 The label can be set via the same edit modal as genres. When no explicit label is set, the game detail page derives and displays a label from the raw `playtime_hours` value.
+
+---
+
+## Advanced Library Filters
+
+The Library filter panel supports additional filters beyond store/genre/search:
+
+- **ProtonDB tier** (`Platinum`, `Gold+`, `Silver+`, `Bronze+`)
+- **Without Steam AppID**
+- **Without IGDB data**
+- **Exclude streaming-only entries**
+- **Collection include/exclude logic** (cycle each collection through neutral/include/exclude)
+
+All filters and sorting are URL-driven (`/library?...`) so filtered views are bookmarkable and shareable.

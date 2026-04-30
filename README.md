@@ -43,8 +43,11 @@ All your games from every store, displayed in one place. Smart deduplication ens
 ![Library](docs/images/library.png)
 
 - **Multi-store filtering** — Filter by store, genre, or search by name
-- **Flexible sorting** — Sort by name, rating, playtime, or release date
+- **Search-friendly matching** — Search supports special characters (including `%`) safely
+- **Flexible sorting** — Sort by name, rating, playtime, or release date (including IGDB release date)
 - **Store indicators** — See at a glance which platforms you own each game on
+- **Shareable URLs** — Filters and sorting are URL-driven, so links reproduce the same library view
+- **Advanced filters** — Exclude streaming-only entries, filter by ProtonDB tier, find games without Steam AppID/IGDB data, and include/exclude collections
 
 ### Rich Game Details
 
@@ -89,7 +92,19 @@ Connect your accounts and sync your library with a single click.
 
 - One-click sync per store or sync everything at once
 - Secure credential storage
-- IGDB integration for metadata enrichment
+- Metadata enrichment from IGDB, Metacritic, ProtonDB, and SteamGridDB
+- Per-game controls to manually sync Steam AppID/IGDB ID, adjust metadata, and override cover art
+
+### What Changed Since Upstream
+
+Highlights included in this fork:
+
+- **Safer library search** — `%` and other special characters are escaped correctly in SQL `LIKE` queries.
+- **URL-first library state** — Filters and sorting are controlled by URL params for consistent sharing/bookmarking.
+- **Expanded filtering** — Includes/excludes by collection, ProtonDB tier filtering, and quick toggles for missing Steam/IGDB metadata.
+- **Improved sort behavior** — Release-date sorting supports IGDB release date and keeps the UI selection in sync.
+- **Release date fallback on detail page** — Uses IGDB epoch timestamps and displays them in ISO format (`YYYY-MM-DD`) when needed.
+- **Broader metadata workflows** — Includes SteamGridDB cover sync plus integrated Metacritic and ProtonDB sync paths.
 
 ---
 
