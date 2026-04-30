@@ -1347,10 +1347,10 @@
                         </li>
                         {% endif %}
 
-                        {% if game.release_date %}
+                        {% if game.igdb_release_date or game.release_date %}
                         <li>
                             <span class="info-label">Release Date</span>
-                            <span class="info-value">{{ game.release_date[:10] if game.release_date else 'Unknown' }}</span>
+                            <span class="info-value">{{ game.release_date_display or 'Unknown' }}</span>
                         </li>
                         {% endif %}
 

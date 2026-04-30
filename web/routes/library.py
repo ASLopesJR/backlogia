@@ -3,6 +3,7 @@
 
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -133,7 +134,6 @@ def library(
     existing_columns = {row[1] for row in cursor.fetchall()}
     valid_sorts = ["name", "store", "playtime_hours", "critics_score", "release_date", "total_rating", "igdb_rating", "aggregated_rating", "average_rating", "metacritic_score", "metacritic_user_score", "igdb_release_date"]
     available_sorts = [s for s in valid_sorts if s in existing_columns]
-    print(available_sorts)
     if sort not in available_sorts:
         sort = "name"
     if sort in available_sorts:
@@ -289,6 +289,25 @@ def game_detail(request: Request, game_id: int, conn: sqlite3.Connection = Depen
     """Game detail page - shows combined view for games owned on multiple stores."""
     cursor = conn.cursor()
 
+    def release_date_display(game_row: dict) -> Optional[str]:
+        """Return YYYY-MM-DD from release_date or igdb_release_date epoch."""
+        release_date = game_row.get("release_date")
+        if release_date:
+            return str(release_date)[:10]
+
+        igdb_release_date = game_row.get("igdb_release_date")
+        if igdb_release_date in (None, ""):
+            return None
+
+        try:
+            epoch = int(igdb_release_date)
+            # Handle millisecond epochs defensively.
+            if epoch > 10_000_000_000:
+                epoch //= 1000
+            return datetime.fromtimestamp(epoch, tz=timezone.utc).date().isoformat()
+        except (TypeError, ValueError, OSError, OverflowError):
+            return None
+
     cursor.execute("SELECT * FROM games WHERE id = ?", (game_id,))
     game = cursor.fetchone()
 
@@ -307,6 +326,9 @@ def game_detail(request: Request, game_id: int, conn: sqlite3.Connection = Depen
         related_games = [dict(g) for g in cursor.fetchall()]
     else:
         related_games = [game_dict]
+
+    for related in related_games:
+        related["release_date_display"] = release_date_display(related)
 
     # High-priority list
     suffixes = [
@@ -353,6 +375,8 @@ def game_detail(request: Request, game_id: int, conn: sqlite3.Connection = Depen
             primary_game = g
         elif g.get("playtime_hours") and not primary_game.get("playtime_hours"):
             primary_game = g
+
+    primary_game["release_date_display"] = release_date_display(primary_game)
 
     return templates.TemplateResponse(
         request,
