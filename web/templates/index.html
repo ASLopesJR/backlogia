@@ -2051,11 +2051,71 @@
         if ('scrollRestoration' in history) {
             history.scrollRestoration = 'manual';
         }
-        
+
+        const SCROLL_STATE_KEY = 'backlogiaIndexScrollY';
+        let scrollStateFrame = null;
+
+        function getScrollState() {
+            const state = history.state;
+            if (!state || typeof state !== 'object') {
+                return null;
+            }
+
+            const scrollPos = Number.parseInt(state[SCROLL_STATE_KEY], 10);
+            return Number.isFinite(scrollPos) ? Math.max(0, scrollPos) : null;
+        }
+
+        function updateScrollState(scrollPos = window.scrollY) {
+            const currentState = history.state && typeof history.state === 'object' ? history.state : {};
+            const normalizedScrollPos = Math.max(0, Math.round(scrollPos));
+
+            if (currentState[SCROLL_STATE_KEY] === normalizedScrollPos) {
+                return;
+            }
+
+            history.replaceState({
+                ...currentState,
+                [SCROLL_STATE_KEY]: normalizedScrollPos
+            }, document.title);
+        }
+
+        function queueScrollStateUpdate() {
+            if (scrollStateFrame !== null) {
+                return;
+            }
+
+            scrollStateFrame = window.requestAnimationFrame(() => {
+                scrollStateFrame = null;
+                updateScrollState();
+            });
+        }
+
+        function restoreScrollPosition() {
+            const savedScrollPos = getScrollState();
+            if (savedScrollPos === null) {
+                return;
+            }
+
+            let attempts = 0;
+            const checkAndScroll = () => {
+                if (window.virtualGrid && window.virtualGrid.container.offsetHeight > 100) {
+                    window.scrollTo({
+                        top: savedScrollPos,
+                        behavior: 'auto'
+                    });
+                } else if (attempts < 20) {
+                    attempts++;
+                    setTimeout(checkAndScroll, 50);
+                }
+            };
+
+            checkAndScroll();
+        }
+
         // Instant attempt before DOM fully loads
-        const initialSavedScrollPos = sessionStorage.getItem('backlogia_scroll_pos');
-        if (initialSavedScrollPos) {
-            window.scrollTo(0, parseInt(initialSavedScrollPos));
+        const initialSavedScrollPos = getScrollState();
+        if (initialSavedScrollPos !== null) {
+            window.scrollTo(0, initialSavedScrollPos);
         }
 
         // Load saved preference on page load
@@ -2069,9 +2129,6 @@
             // Ensure minimum height so the browser knows the page is scrollable
             window.virtualGrid.container.style.minHeight = '2000px';
 
-            // Restore filter/sort preferences from localStorage if no URL params
-            restoreFilterPreferences();
-
             // Toggle selected class on store chips and sync with header stats
             document.querySelectorAll('.filter-store-chip input[type="checkbox"]').forEach(cb => {
                 cb.addEventListener('change', function() {
@@ -2082,32 +2139,18 @@
                 });
             });
 
-            // Robust scroll restoration
-            const savedScrollPos = sessionStorage.getItem('backlogia_scroll_pos');
-            if (savedScrollPos) {
-                let attempts = 0;
-                const checkAndScroll = () => {
-                    if (window.virtualGrid && window.virtualGrid.container.offsetHeight > 100) {
-                        window.scrollTo({
-                            top: parseInt(savedScrollPos),
-                            behavior: 'auto'
-                        });
-                        sessionStorage.removeItem('backlogia_scroll_pos');
-                    } else if (attempts < 20) {
-                        attempts++;
-                        setTimeout(checkAndScroll, 50);
-                    } else {
-                        sessionStorage.removeItem('backlogia_scroll_pos');
-                    }
-                };
-                checkAndScroll();
-            }
+            restoreScrollPosition();
         });
 
-        // Save scroll position
-        window.addEventListener('beforeunload', () => {
-            sessionStorage.setItem('backlogia_scroll_pos', window.scrollY);
+        window.addEventListener('scroll', queueScrollStateUpdate, { passive: true });
+        window.addEventListener('pagehide', () => {
+            if (scrollStateFrame !== null) {
+                window.cancelAnimationFrame(scrollStateFrame);
+                scrollStateFrame = null;
+            }
+            updateScrollState();
         });
+        window.addEventListener('pageshow', restoreScrollPosition);
 
         // Get current filter state from the panel
         function getPanelFilterState() {
@@ -2159,7 +2202,7 @@
                 const collections_include = urlParams.getAll('collections_include');
                 const collections_exclude = urlParams.getAll('collections_exclude');
                 saveFilterPreferences(stores, genres, search, sort, order, excludeStreaming, protondbTier, noIgdb, noSteam, playtimeLabels, collections_include, collections_exclude);
-                return;
+                return false;
             }
 
             const saved = localStorage.getItem('filterPreferences');
@@ -2170,9 +2213,14 @@
                     prefs.excludeStreaming || prefs.protondbTier || prefs.noIgdb || prefs.noSteam || (prefs.playtimeLabels && prefs.playtimeLabels.length) || (prefs.collections_include && prefs.collections_include.length) || (prefs.collections_exclude && prefs.collections_exclude.length)) {
                     const url = buildUrl(prefs.stores || [], prefs.genres || [], prefs.search || '', prefs.sort || 'name', prefs.order || 'asc', prefs.excludeStreaming || false, prefs.protondbTier || '', prefs.noIgdb || false, prefs.noSteam || false, prefs.playtimeLabels || [], prefs.collections_include || [], prefs.collections_exclude || []);
                     window.location.href = url;
+                    return true;
                 }
             }
+
+            return false;
         }
+
+        restoreFilterPreferences();
 
         // Clear saved filter preferences
         function clearFilterPreferences() {
