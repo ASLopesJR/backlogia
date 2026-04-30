@@ -7,6 +7,7 @@ import time
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
+import re
 
 import requests
 
@@ -16,7 +17,7 @@ _last_request_time = 0
 _MIN_REQUEST_INTERVAL = 0.2  # 200ms between requests (5 req/sec max)
 
 
-def _rate_limited_request(url, params=None, interval=_MIN_REQUEST_INTERVAL):
+def _rate_limited_request(url, params=None, interval=_MIN_REQUEST_INTERVAL, allow_redirects=True):
     """Make a rate-limited request to Steam Store API."""
     global _last_request_time
 
@@ -28,10 +29,41 @@ def _rate_limited_request(url, params=None, interval=_MIN_REQUEST_INTERVAL):
         _last_request_time = time.time()
 
     try:
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params, timeout=10, allow_redirects=allow_redirects)
         return response
     except requests.RequestException:
         return None
+
+
+def resolve_canonical_steam_appid(appid):
+    """Resolve canonical Steam AppID by following storefront redirects.
+
+    Returns:
+        (canonical_appid, reason)
+        - canonical_appid: string AppID to use for API calls
+        - reason: None on success, otherwise a short reason code
+    """
+    if appid is None:
+        return None, "missing_appid"
+
+    appid_str = str(appid).strip()
+    if not appid_str:
+        return None, "missing_appid"
+
+    url = f"https://store.steampowered.com/app/{appid_str}/"
+    response = _rate_limited_request(url, interval=1.5, allow_redirects=True)
+    if not response:
+        return appid_str, "request_failed"
+    if response.status_code != 200:
+        return appid_str, f"http_{response.status_code}"
+
+    try:
+        match = re.search(r"/app/(\d+)", response.url or "")
+        if not match:
+            return appid_str, "canonical_not_found"
+        return match.group(1), None
+    except Exception:
+        return appid_str, "canonical_parse_error"
 
 def get_steam_store_name(appid):
     """Fetch store info for a Steam game.
@@ -201,14 +233,16 @@ def sync_steam_store_info(conn, force=False, max_workers=5, progress_callback=No
 
     def fetch_and_update(row):
         game_id, store_id, name = row
-        store_info, reason = get_steam_store_info(store_id)
-        return game_id, store_id, name, store_info, reason
+        canonical_appid, canonical_reason = resolve_canonical_steam_appid(store_id)
+        lookup_appid = canonical_appid or str(store_id)
+        store_info, reason = get_steam_store_info(lookup_appid)
+        return game_id, store_id, lookup_appid, name, store_info, reason, canonical_reason
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(fetch_and_update, row): row for row in games}
 
         for future in as_completed(futures):
-            game_id, store_id, name, store_info, reason = future.result()
+            game_id, store_id, lookup_appid, name, store_info, reason, canonical_reason = future.result()
 
             with results_lock:
                 completed += 1
@@ -227,6 +261,7 @@ def sync_steam_store_info(conn, force=False, max_workers=5, progress_callback=No
                             publishers = COALESCE(?, publishers),
                             release_date = COALESCE(?, release_date),
                             screenshots = COALESCE(?, screenshots),
+                            steam_app_id = ?,
                             steam_synced_at = CURRENT_TIMESTAMP,
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?""",
@@ -236,6 +271,7 @@ def sync_steam_store_info(conn, force=False, max_workers=5, progress_callback=No
                          json.dumps(store_info["publishers"]) if store_info["publishers"] else None,
                          store_info["release_date"],
                          json.dumps(store_info["screenshots"]) if store_info["screenshots"] else None,
+                         lookup_appid,
                          game_id),
                     )
                     thread_conn.commit()
@@ -251,10 +287,11 @@ def sync_steam_store_info(conn, force=False, max_workers=5, progress_callback=No
                 try:
                     thread_conn.execute(
                         """UPDATE games SET
+                            steam_app_id = ?,
                             steam_synced_at = CURRENT_TIMESTAMP,
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?""",
-                        (game_id,),
+                        (lookup_appid, game_id),
                     )
                     thread_conn.commit()
                 finally:
@@ -307,14 +344,16 @@ def sync_steam_reviews(conn, force=False, max_workers=5, progress_callback=None)
 
     def fetch_and_update(row):
         game_id, store_id, name = row
-        reviews, reason = get_steam_review_score(store_id)
-        return game_id, store_id, name, reviews, reason
+        canonical_appid, canonical_reason = resolve_canonical_steam_appid(store_id)
+        lookup_appid = canonical_appid or str(store_id)
+        reviews, reason = get_steam_review_score(lookup_appid)
+        return game_id, store_id, lookup_appid, name, reviews, reason, canonical_reason
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(fetch_and_update, row): row for row in games}
 
         for future in as_completed(futures):
-            game_id, store_id, name, reviews, reason = future.result()
+            game_id, store_id, lookup_appid, name, reviews, reason, canonical_reason = future.result()
 
             with results_lock:
                 completed += 1
@@ -328,10 +367,11 @@ def sync_steam_reviews(conn, force=False, max_workers=5, progress_callback=None)
                     thread_conn.execute(
                         """UPDATE games SET
                             critics_score = ?,
-                            extra_data = json_set(COALESCE(extra_data, '{}'), '$.review_desc', ?, '$.total_reviews', ?),
+                            steam_app_id = ?,
+                            extra_data = json_set(COALESCE(extra_data, '{}'), '$.steam_review_appid', ?, '$.review_desc', ?, '$.total_reviews', ?),
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?""",
-                        (reviews["review_score"], reviews["review_desc"], reviews["total_reviews"], game_id),
+                        (reviews["review_score"], lookup_appid, lookup_appid, reviews["review_desc"], reviews["total_reviews"], game_id),
                     )
                     thread_conn.commit()
                 finally:
@@ -340,6 +380,19 @@ def sync_steam_reviews(conn, force=False, max_workers=5, progress_callback=None)
                 with results_lock:
                     updated += 1
             else:
+                thread_conn = sqlite3.connect(db_path)
+                try:
+                    thread_conn.execute(
+                        """UPDATE games SET
+                            steam_app_id = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?""",
+                        (lookup_appid, game_id),
+                    )
+                    thread_conn.commit()
+                finally:
+                    thread_conn.close()
+
                 with results_lock:
                     failed += 1
 
@@ -347,21 +400,25 @@ def sync_steam_reviews(conn, force=False, max_workers=5, progress_callback=None)
 
 def sync_steam_by_appid(conn, game_id, appid):
     cursor = conn.cursor()
-    reviews, reason = get_steam_review_score(appid)
+    canonical_appid, canonical_reason = resolve_canonical_steam_appid(appid)
+    lookup_appid = canonical_appid or str(appid)
+
+    reviews, reason = get_steam_review_score(lookup_appid)
 
     if reviews:
         cursor.execute(
             """UPDATE games SET
                 critics_score = ?,
-                extra_data = json_set(COALESCE(extra_data, '{}'), '$.review_desc', ?, '$.total_reviews', ?),
+                steam_app_id = ?,
+                extra_data = json_set(COALESCE(extra_data, '{}'), '$.steam_review_appid', ?, '$.review_desc', ?, '$.total_reviews', ?),
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?""",
-            (reviews["review_score"], reviews["review_desc"], reviews["total_reviews"], game_id),
+            (reviews["review_score"], lookup_appid, lookup_appid, reviews["review_desc"], reviews["total_reviews"], game_id),
         )
     else:
-        print(f"[steam review] appid={appid}: {reason}")
+        print(f"[steam review] appid={lookup_appid}: {reason}")
 
-    store_info, reason = get_steam_store_info(appid)
+    store_info, reason = get_steam_store_info(lookup_appid)
     if store_info:
         cursor.execute(
             """UPDATE games SET
@@ -371,7 +428,7 @@ def sync_steam_by_appid(conn, game_id, appid):
                 publishers = COALESCE(?, publishers),
                 release_date = COALESCE(?, release_date),
                 screenshots = COALESCE(?, screenshots),
-                steam_app_id = COALESCE(?, steam_app_id),
+                steam_app_id = ?,
                 steam_synced_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?""",
@@ -381,7 +438,7 @@ def sync_steam_by_appid(conn, game_id, appid):
                 json.dumps(store_info["publishers"]) if store_info["publishers"] else None,
                 store_info["release_date"],
                 json.dumps(store_info["screenshots"]) if store_info["screenshots"] else None,
-                appid,
+                lookup_appid,
                 game_id),
         )
 
@@ -401,8 +458,9 @@ def sync_steam(conn, force=False, max_workers=5, progress_callback=None):
     def make_phase_progress(prefix):
         if not progress_callback:
             return None
+        callback = progress_callback
         def _cb(current, total, message):
-            progress_callback(current, total, f"[{prefix}] {message}")
+            callback(current, total, f"[{prefix}] {message}")
         return _cb
 
     cursor = conn.cursor()
