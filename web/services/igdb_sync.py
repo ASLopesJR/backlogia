@@ -823,7 +823,10 @@ def apply_igdb_data(conn, game_id, igdb_game, existing_genres=None):
                 merged_genres,
                 steam_app_id,
                 igdb_game.get("first_release_date"),
+<<<<<<< HEAD
                 json.dumps(igdb_game) if igdb_game else None,
+=======
+>>>>>>> a3f69c5 (feat(sync): parallelize IGDB metadata synchronization)
                 game_id,
             )
 
@@ -843,8 +846,12 @@ def apply_igdb_data(conn, game_id, igdb_game, existing_genres=None):
                 nsfw = ?,
                 genres = ?,
                 steam_app_id = COALESCE(?, steam_app_id),
+<<<<<<< HEAD
                 igdb_release_date = ?,
                 igdb_debug_info = ?
+=======
+                igdb_release_date = ?
+>>>>>>> a3f69c5 (feat(sync): parallelize IGDB metadata synchronization)
                 WHERE id = ?"""
         try:
             cursor.execute( query, params)
@@ -1052,7 +1059,11 @@ def sync_games(conn, client, limit=None, force=False, progress_callback=None):
     other_games = []
 
     for gid, name, store, genres, rd, sid, extra_raw, appid in games:
+<<<<<<< HEAD
         if store == "steam" or appid:
+=======
+        if store == "steam":
+>>>>>>> a3f69c5 (feat(sync): parallelize IGDB metadata synchronization)
             steam_dict[str(sid if store == "steam" else appid)] = (gid, name, store, genres, rd, sid, extra_raw)
         elif store == "gog":
             slug = None
