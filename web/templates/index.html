@@ -2173,10 +2173,9 @@
             return { stores, genres, excludeStreaming, protondbTier, noIgdb, noSteam, playtimeLabels, collections_include, collections_exclude };
         }
 
-        // Save filter/sort preferences to localStorage
+        // Filter/sort preferences are URL-driven; keep this as a no-op for existing callers.
         function saveFilterPreferences(stores, genres, search, sort, order, excludeStreaming, protondbTier, noIgdb, noSteam, playtimeLabels, collections_include, collections_exclude) {
-            const prefs = { stores, genres, search, sort, order, excludeStreaming: excludeStreaming || false, protondbTier: protondbTier || '', noIgdb: noIgdb || false, noSteam: noSteam || false, playtimeLabels: playtimeLabels || [], collections_include: collections_include || [], collections_exclude: collections_exclude || [] };
-            localStorage.setItem('filterPreferences', JSON.stringify(prefs));
+            return;
         }
 
         // Restore filter/sort preferences from localStorage
@@ -2201,20 +2200,7 @@
                 const playtimeLabels = urlParams.getAll('playtime_label');
                 const collections_include = urlParams.getAll('collections_include');
                 const collections_exclude = urlParams.getAll('collections_exclude');
-                saveFilterPreferences(stores, genres, search, sort, order, excludeStreaming, protondbTier, noIgdb, noSteam, playtimeLabels, collections_include, collections_exclude);
                 return false;
-            }
-
-            const saved = localStorage.getItem('filterPreferences');
-            if (saved) {
-                const prefs = JSON.parse(saved);
-                if ((prefs.stores && prefs.stores.length) || (prefs.genres && prefs.genres.length) ||
-                    prefs.search || (prefs.sort && prefs.sort !== 'name') || (prefs.order && prefs.order !== 'asc') ||
-                    prefs.excludeStreaming || prefs.protondbTier || prefs.noIgdb || prefs.noSteam || (prefs.playtimeLabels && prefs.playtimeLabels.length) || (prefs.collections_include && prefs.collections_include.length) || (prefs.collections_exclude && prefs.collections_exclude.length)) {
-                    const url = buildUrl(prefs.stores || [], prefs.genres || [], prefs.search || '', prefs.sort || 'name', prefs.order || 'asc', prefs.excludeStreaming || false, prefs.protondbTier || '', prefs.noIgdb || false, prefs.noSteam || false, prefs.playtimeLabels || [], prefs.collections_include || [], prefs.collections_exclude || []);
-                    window.location.href = url;
-                    return true;
-                }
             }
 
             return false;
@@ -2222,14 +2208,8 @@
 
         restoreFilterPreferences();
 
-        // Clear saved filter preferences
-        function clearFilterPreferences() {
-            localStorage.removeItem('filterPreferences');
-        }
-
         // Reset all filters and clear saved preferences
         function resetAllFilters() {
-            clearFilterPreferences();
             window.location.href = '/library';
         }
 
