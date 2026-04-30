@@ -1502,6 +1502,8 @@
                 <option value="name-asc" {% if current_sort == 'name' and current_order == 'asc' %}selected{% endif %}>Name (A-Z)</option>
                 <option value="name-desc" {% if current_sort == 'name' and current_order == 'desc' %}selected{% endif %}>Name (Z-A)</option>
                 <option value="average_rating-desc" {% if current_sort == 'average_rating' %}selected{% endif %}>Average Rating (High-Low)</option>
+                <option value="igdb_release_date-asc" {% if current_sort == 'igdb_release_date' and current_order == 'asc' %}selected{% endif %}>Release Date (Oldest-Newest)</option>
+                <option value="igdb_release_date-desc" {% if current_sort == 'igdb_release_date' and current_order == 'desc' %}selected{% endif %}>Release Date (Newest-Oldest)</option>
                 <option value="critics_score-desc" {% if current_sort == 'critics_score' %}selected{% endif %}>Steam Rating (High-Low)</option>
                 {% if 'metacritic_score' in available_sorts %}
                 <option value="metacritic_score-desc" {% if current_sort == 'metacritic_score' %}selected{% endif %}>Metacritic Score (High-Low)</option>
