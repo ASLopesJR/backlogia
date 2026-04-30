@@ -257,11 +257,11 @@ def update_cover_override_sgdb(game_id: int, conn: sqlite3.Connection = Depends(
 def update_metacritic(game_id: int, body: UpdateMetacriticRequest, conn: sqlite3.Connection = Depends(get_db)):
     """Set custom Metacritic slug and fetch data."""
     # Import here to avoid circular imports
-    from ..services.metacritic_sync import MetacriticClient, add_metacritic_columns
-    from ..services.database_builder import update_average_rating
+    from ..services.metacritic_sync import MetacriticClient
+    from ..services.database_builder import update_average_rating, migrate_database
 
     # Ensure columns exist
-    add_metacritic_columns(conn)
+    migrate_database(conn)
 
     metacritic_slug = body.metacritic_slug
 
@@ -339,10 +339,11 @@ def update_metacritic(game_id: int, body: UpdateMetacriticRequest, conn: sqlite3
 @router.post("/api/game/{game_id}/protondb")
 def update_protondb(game_id: int, body: UpdateProtonDBRequest, conn: sqlite3.Connection = Depends(get_db)):
     """Set custom Steam ID and fetch ProtonDB data."""
-    from ..services.protondb_sync import ProtonDBClient, add_protondb_columns
+    from ..services.protondb_sync import ProtonDBClient
+    from ..services.database_builder import migrate_database
 
     # Ensure columns exist
-    add_protondb_columns(conn)
+    migrate_database(conn)
 
     steam_id = body.steam_id
 
