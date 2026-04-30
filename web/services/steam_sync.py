@@ -15,6 +15,9 @@ import requests
 _rate_limit_lock = Lock()
 _last_request_time = 0
 _MIN_REQUEST_INTERVAL = 0.2  # 200ms between requests (5 req/sec max)
+_CANONICAL_LOOKUP_INTERVAL = 0.5
+_canonical_appid_cache = {}
+_canonical_cache_lock = Lock()
 
 
 def _rate_limited_request(url, params=None, interval=_MIN_REQUEST_INTERVAL, allow_redirects=True):
@@ -50,20 +53,41 @@ def resolve_canonical_steam_appid(appid):
     if not appid_str:
         return None, "missing_appid"
 
+    with _canonical_cache_lock:
+        cached = _canonical_appid_cache.get(appid_str)
+    if cached:
+        return cached
+
     url = f"https://store.steampowered.com/app/{appid_str}/"
-    response = _rate_limited_request(url, interval=1.5, allow_redirects=True)
+    response = _rate_limited_request(url, interval=_CANONICAL_LOOKUP_INTERVAL, allow_redirects=True)
     if not response:
-        return appid_str, "request_failed"
+        result = (appid_str, "request_failed")
+        with _canonical_cache_lock:
+            _canonical_appid_cache[appid_str] = result
+        return result
     if response.status_code != 200:
-        return appid_str, f"http_{response.status_code}"
+        result = (appid_str, f"http_{response.status_code}")
+        with _canonical_cache_lock:
+            _canonical_appid_cache[appid_str] = result
+        return result
 
     try:
         match = re.search(r"/app/(\d+)", response.url or "")
         if not match:
-            return appid_str, "canonical_not_found"
-        return match.group(1), None
+            result = (appid_str, "canonical_not_found")
+            with _canonical_cache_lock:
+                _canonical_appid_cache[appid_str] = result
+            return result
+
+        result = (match.group(1), None)
+        with _canonical_cache_lock:
+            _canonical_appid_cache[appid_str] = result
+        return result
     except Exception:
-        return appid_str, "canonical_parse_error"
+        result = (appid_str, "canonical_parse_error")
+        with _canonical_cache_lock:
+            _canonical_appid_cache[appid_str] = result
+        return result
 
 def get_steam_store_name(appid):
     """Fetch store info for a Steam game.
