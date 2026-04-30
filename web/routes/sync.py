@@ -104,13 +104,14 @@ def sync_store(store: StoreType):
 def sync_igdb(mode: str):
     """Sync IGDB metadata. Mode can be 'new'/'missing' (unmatched only) or 'all' (resync everything)."""
     # Import here to avoid circular imports
-    from ..services.igdb_sync import IGDBClient, sync_games as igdb_sync_games, add_igdb_columns
+    from ..services.igdb_sync import IGDBClient, sync_games as igdb_sync_games
+    from ..services.database_builder import migrate_database
 
     try:
         conn = sqlite3.connect(DATABASE_PATH)
 
-        # Ensure IGDB columns exist
-        add_igdb_columns(conn)
+        # Ensure columns exist
+        migrate_database(conn)
 
         # Initialize client
         client = IGDBClient()
@@ -135,14 +136,15 @@ def sync_metacritic(mode: str):
     """Sync Metacritic scores. Mode can be 'missing' (unmatched only) or 'all' (resync everything)."""
     # Import here to avoid circular imports
     from ..services.metacritic_sync import (
-        MetacriticClient, sync_games as metacritic_sync_games, add_metacritic_columns
+        MetacriticClient, sync_games as metacritic_sync_games
     )
+    from ..services.database_builder import migrate_database
 
     try:
         conn = sqlite3.connect(DATABASE_PATH)
 
-        # Ensure Metacritic columns exist
-        add_metacritic_columns(conn)
+        # Ensure columns exist
+        migrate_database(conn)
 
         # Initialize client
         client = MetacriticClient()
@@ -315,7 +317,8 @@ def sync_sgdb_async(mode: str):
 @router.post("/api/sync/igdb/{mode}/async")
 def sync_igdb_async(mode: str):
     """Start a background job to sync IGDB metadata. Returns job ID for tracking."""
-    from ..services.igdb_sync import IGDBClient, sync_games as igdb_sync_games, add_igdb_columns
+    from ..services.igdb_sync import IGDBClient, sync_games as igdb_sync_games
+    from ..services.database_builder import migrate_database
 
     mode_text = "all games" if mode == "all" else "missing metadata"
     job_id = create_job(JobType.IGDB_SYNC, f"Starting IGDB sync ({mode_text})...")
@@ -325,8 +328,8 @@ def sync_igdb_async(mode: str):
             conn = sqlite3.connect(DATABASE_PATH)
             conn.row_factory = sqlite3.Row
 
-            # Ensure IGDB columns exist
-            add_igdb_columns(conn)
+            # Ensure columns exist
+            migrate_database(conn)
 
             update_job_progress(job_id, 0, 1, f"Initializing IGDB sync...")
 
@@ -356,8 +359,9 @@ def sync_igdb_async(mode: str):
 def sync_metacritic_async(mode: str):
     """Start a background job to sync Metacritic scores. Returns job ID for tracking."""
     from ..services.metacritic_sync import (
-        MetacriticClient, sync_games as metacritic_sync_games, add_metacritic_columns
+        MetacriticClient, sync_games as metacritic_sync_games
     )
+    from ..services.database_builder import migrate_database
 
     mode_text = "all games" if mode == "all" else "missing scores"
     job_id = create_job(JobType.METACRITIC_SYNC, f"Starting Metacritic sync ({mode_text})...")
@@ -367,8 +371,8 @@ def sync_metacritic_async(mode: str):
             conn = sqlite3.connect(DATABASE_PATH)
             conn.row_factory = sqlite3.Row
 
-            # Ensure Metacritic columns exist
-            add_metacritic_columns(conn)
+            # Ensure columns exist
+            migrate_database(conn)
 
             update_job_progress(job_id, 0, 1, f"Initializing Metacritic sync...")
 
@@ -393,19 +397,21 @@ def sync_metacritic_async(mode: str):
 
     return {"success": True, "job_id": job_id, "message": f"Started Metacritic sync job ({mode_text})"}
 
-
 @router.post("/api/sync/protondb/{mode}")
 def sync_protondb(mode: str):
-    """Sync ProtonDB data. Mode can be 'missing' (unmatched only) or 'all' (resync everything)."""
+    """Sync ProtonDB tiers. Mode can be 'missing' (unmatched only) or 'all' (resync everything)."""
+    # Import here to avoid circular imports
     from ..services.protondb_sync import (
-        ProtonDBClient, sync_games as protondb_sync_games, add_protondb_columns
+        ProtonDBClient, sync_games as protondb_sync_games
     )
+    from ..services.database_builder import migrate_database
 
     try:
         conn = sqlite3.connect(DATABASE_PATH)
 
-        # Ensure ProtonDB columns exist
-        add_protondb_columns(conn)
+        # Ensure columns exist
+        migrate_database(conn)
+
 
         # Initialize client
         client = ProtonDBClient()
@@ -427,8 +433,9 @@ def sync_protondb(mode: str):
 def sync_protondb_async(mode: str):
     """Start a background job to sync ProtonDB data. Returns job ID for tracking."""
     from ..services.protondb_sync import (
-        ProtonDBClient, sync_games as protondb_sync_games, add_protondb_columns
+        ProtonDBClient, sync_games as protondb_sync_games
     )
+    from ..services.database_builder import migrate_database
 
     mode_text = "all Steam games" if mode == "all" else "missing data"
     job_id = create_job(JobType.PROTONDB_SYNC, f"Starting ProtonDB sync ({mode_text})...")
@@ -438,8 +445,8 @@ def sync_protondb_async(mode: str):
             conn = sqlite3.connect(DATABASE_PATH)
             conn.row_factory = sqlite3.Row
 
-            # Ensure ProtonDB columns exist
-            add_protondb_columns(conn)
+            # Ensure columns exist
+            migrate_database(conn)
 
             update_job_progress(job_id, 0, 1, f"Initializing ProtonDB sync...")
 

@@ -518,40 +518,6 @@ class IGDBClient:
         return clean.strip()
 
 
-def add_igdb_columns(conn):
-    """Add IGDB-related columns to the database if they don't exist."""
-    cursor = conn.cursor()
-
-    # Check existing columns
-    cursor.execute("PRAGMA table_info(games)")
-    existing_columns = {row[1] for row in cursor.fetchall()}
-
-    new_columns = [
-        ("igdb_id", "INTEGER"),
-        ("igdb_slug", "TEXT"),
-        ("igdb_rating", "REAL"),  # User/community rating (0-100)
-        ("igdb_rating_count", "INTEGER"),
-        ("aggregated_rating", "REAL"),  # Critic rating (0-100)
-        ("aggregated_rating_count", "INTEGER"),
-        ("total_rating", "REAL"),  # Combined rating (0-100)
-        ("total_rating_count", "INTEGER"),
-        ("summary", "TEXT"),
-        ("cover_url", "TEXT"),
-        ("screenshots", "TEXT"),  # JSON array of screenshot URLs
-        ("igdb_matched_at", "TIMESTAMP"),
-        ("nsfw", "BOOLEAN DEFAULT 0"),  # NSFW flag (from IGDB themes/age ratings or manual)
-        ("steam_app_id", "TEXT"),  # Steam App ID from IGDB external_games (for ProtonDB)
-        ("igdb_release_date", "INTEGER"),  # IGDB first_release_date as Unix timestamp
-    ]
-
-    for col_name, col_type in new_columns:
-        if col_name not in existing_columns:
-            cursor.execute(f"ALTER TABLE games ADD COLUMN {col_name} {col_type}")
-            print(f"Added column: {col_name}")
-
-    conn.commit()
-
-
 def extract_genres_and_themes(igdb_data):
     """Extract genres and themes from IGDB data as a combined list of tag names."""
     tags = []

@@ -42,8 +42,46 @@ def create_database():
 
             -- Stats
             playtime_hours REAL,
+            playtime_label TEXT,
             critics_score REAL,
             average_rating REAL,  -- Computed average across all available ratings
+
+            -- IGDB data
+            igdb_id INTEGER,
+            igdb_slug TEXT,
+            igdb_rating REAL,
+            igdb_rating_count INTEGER,
+            aggregated_rating REAL,
+            aggregated_rating_count INTEGER,
+            total_rating REAL,
+            total_rating_count INTEGER,
+            igdb_matched_at TIMESTAMP,
+            igdb_release_date INTEGER,
+
+            -- Metacritic data
+            metacritic_score INTEGER,
+            metacritic_user_score REAL,
+            metacritic_url TEXT,
+            metacritic_slug TEXT,
+            metacritic_matched_at TIMESTAMP,
+
+            -- ProtonDB data
+            protondb_tier TEXT,
+            protondb_score REAL,
+            protondb_confidence TEXT,
+            protondb_total INTEGER,
+            protondb_trending_tier TEXT,
+            protondb_matched_at TIMESTAMP,
+
+            -- Additional metadata
+            summary TEXT,
+            cover_url TEXT,
+            cover_url_override TEXT,
+            screenshots TEXT,  -- JSON array
+            steam_app_id TEXT,
+            nsfw BOOLEAN DEFAULT 0,
+            hidden BOOLEAN DEFAULT 0,
+            genres_override TEXT,  -- JSON array
 
             -- Additional data
             can_run_offline BOOLEAN,
@@ -68,6 +106,14 @@ def create_database():
 
     cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_games_name ON games(name)
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_games_steam_app_id ON games(steam_app_id)
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_games_igdb_id ON games(igdb_id)
     """)
 
     # Settings table for storing user configuration
@@ -873,28 +919,65 @@ def import_local_games(conn):
         return 0
 
 
-def add_average_rating_column(conn):
-    """Add average_rating column to the database if it doesn't exist."""
+def migrate_database(conn):
+    """Ensure all columns and indices exist in the database."""
     cursor = conn.cursor()
+    
+    # Check existing columns
     cursor.execute("PRAGMA table_info(games)")
     existing_columns = {row[1] for row in cursor.fetchall()}
 
-    if "average_rating" not in existing_columns:
-        cursor.execute("ALTER TABLE games ADD COLUMN average_rating REAL")
-        print("Added column: average_rating")
-        conn.commit()
+    # List of all expected columns (name, type)
+    expected_columns = [
+        ("playtime_label", "TEXT"),
+        ("average_rating", "REAL"),
+        ("igdb_id", "INTEGER"),
+        ("igdb_slug", "TEXT"),
+        ("igdb_rating", "REAL"),
+        ("igdb_rating_count", "INTEGER"),
+        ("aggregated_rating", "REAL"),
+        ("aggregated_rating_count", "INTEGER"),
+        ("total_rating", "REAL"),
+        ("total_rating_count", "INTEGER"),
+        ("igdb_matched_at", "TIMESTAMP"),
+        ("igdb_release_date", "INTEGER"),
+        ("metacritic_score", "INTEGER"),
+        ("metacritic_user_score", "REAL"),
+        ("metacritic_url", "TEXT"),
+        ("metacritic_slug", "TEXT"),
+        ("metacritic_matched_at", "TIMESTAMP"),
+        ("protondb_tier", "TEXT"),
+        ("protondb_score", "REAL"),
+        ("protondb_confidence", "TEXT"),
+        ("protondb_total", "INTEGER"),
+        ("protondb_trending_tier", "TEXT"),
+        ("protondb_matched_at", "TIMESTAMP"),
+        ("summary", "TEXT"),
+        ("cover_url", "TEXT"),
+        ("cover_url_override", "TEXT"),
+        ("screenshots", "TEXT"),
+        ("steam_app_id", "TEXT"),
+        ("nsfw", "BOOLEAN DEFAULT 0"),
+        ("hidden", "BOOLEAN DEFAULT 0"),
+        ("genres_override", "TEXT"),
+        ("steam_synced_at", "TIMESTAMP"),
+        ("removed", "BOOLEAN DEFAULT 0"),
+    ]
 
+    for col_name, col_type in expected_columns:
+        if col_name not in existing_columns:
+            try:
+                cursor.execute(f"ALTER TABLE games ADD COLUMN {col_name} {col_type}")
+                print(f"Added column: {col_name}")
+            except sqlite3.OperationalError as e:
+                # Column might already exist but wasn't caught by PRAGMA for some reason
+                print(f"Error adding column {col_name}: {e}")
 
-def add_steam_synced_at_column(conn):
-    """Add steam_synced_at column to the database if it doesn't exist."""
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA table_info(games)")
-    existing_columns = {row[1] for row in cursor.fetchall()}
-
-    if "steam_synced_at" not in existing_columns:
-        cursor.execute("ALTER TABLE games ADD COLUMN steam_synced_at TIMESTAMP")
-        print("Added column: steam_synced_at")
-        conn.commit()
+    # Add indices
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_steam_app_id ON games(steam_app_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_igdb_id ON games(igdb_id)")
+    
+    conn.commit()
 
 
 def calculate_average_rating(
@@ -946,7 +1029,7 @@ def update_average_rating(conn, game_id):
     cursor = conn.cursor()
 
     # First ensure the column exists
-    add_average_rating_column(conn)
+    migrate_database(conn)
 
     # Fetch all rating fields for this game
     cursor.execute(

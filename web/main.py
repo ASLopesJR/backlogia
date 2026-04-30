@@ -11,9 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .config import DATABASE_PATH, ENABLE_AUTH, SECRET_KEY
-from .database import ensure_extra_columns, ensure_collections_tables, ensure_edit_overrides
-from .services.database_builder import create_database, add_steam_synced_at_column
-from .services.igdb_sync import add_igdb_columns
+from .services.database_builder import create_database, migrate_database
 from .services.jobs import cleanup_orphaned_jobs
 
 # Import routers
@@ -32,13 +30,9 @@ from .routes.jobs import router as jobs_router
 def init_database():
     """Initialize the database and ensure all tables/columns exist."""
     create_database()
-    ensure_extra_columns()
-    ensure_collections_tables()
-    ensure_edit_overrides()
 
     conn = sqlite3.connect(DATABASE_PATH)
-    add_igdb_columns(conn)
-    add_steam_synced_at_column(conn)
+    migrate_database(conn)
     conn.close()
 
     # Clean up any jobs that were running when the server last stopped

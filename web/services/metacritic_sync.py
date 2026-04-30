@@ -199,29 +199,7 @@ class MetacriticClient:
         return clean.strip()
 
 
-def add_metacritic_columns(conn):
-    """Add Metacritic-related columns to the database if they don't exist."""
-    cursor = conn.cursor()
-
-    # Check existing columns
-    cursor.execute("PRAGMA table_info(games)")
-    existing_columns = {row[1] for row in cursor.fetchall()}
-
-    new_columns = [
-        ("metacritic_score", "INTEGER"),  # Critic score 0-100
-        ("metacritic_user_score", "REAL"),  # User score 0-10
-        ("metacritic_url", "TEXT"),  # URL to the game page
-        ("metacritic_slug", "TEXT"),  # Custom override for game matching
-        ("metacritic_matched_at", "TIMESTAMP"),
-    ]
-
-    for col_name, col_type in new_columns:
-        if col_name not in existing_columns:
-            cursor.execute(f"ALTER TABLE games ADD COLUMN {col_name} {col_type}")
-            print(f"Added column: {col_name}")
-
-    conn.commit()
-
+class MetacriticClient:
 
 def calculate_match_score(game_name, metacritic_result):
     """Calculate how well a Metacritic result matches our game."""

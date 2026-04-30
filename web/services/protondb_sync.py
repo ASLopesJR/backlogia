@@ -71,31 +71,6 @@ class ProtonDBClient:
             return None
 
 
-def add_protondb_columns(conn):
-    """Add ProtonDB-related columns to the database if they don't exist."""
-    cursor = conn.cursor()
-
-    # Check existing columns
-    cursor.execute("PRAGMA table_info(games)")
-    existing_columns = {row[1] for row in cursor.fetchall()}
-
-    new_columns = [
-        ("protondb_tier", "TEXT"),  # platinum/gold/silver/bronze/borked/pending
-        ("protondb_score", "REAL"),  # numeric score (0-1)
-        ("protondb_confidence", "TEXT"),  # confidence level string
-        ("protondb_total", "INTEGER"),  # number of user reports
-        ("protondb_trending_tier", "TEXT"),  # recent trend in ratings
-        ("protondb_matched_at", "TIMESTAMP"),
-    ]
-
-    for col_name, col_type in new_columns:
-        if col_name not in existing_columns:
-            cursor.execute(f"ALTER TABLE games ADD COLUMN {col_name} {col_type}")
-            print(f"Added column: {col_name}")
-
-    conn.commit()
-
-
 def _process_single_game(client, game_id, steam_id):
     """
     Process a single game for ProtonDB data.
