@@ -249,6 +249,10 @@ def import_steam_games(conn):
         print(f"  Steam import error: {e}")
         return 0
 
+def normalize_uid_variants(uid):
+    if len(uid) == 32:
+        return f"{uid[0:8]}-{uid[8:12]}-{uid[12:16]}-{uid[16:20]}-{uid[20:]}"
+    return uid
 
 def import_epic_games(conn):
     """Import games from Epic Games Store."""
@@ -267,7 +271,7 @@ def import_epic_games(conn):
         seen_store_ids = set()
         for game in games:
             try:
-                store_id = game.get("app_name")
+                store_id = normalize_uid_variants(game.get("sku"))
                 cursor.execute("""
                     INSERT INTO games (
                         name, store, store_id, description, developers,

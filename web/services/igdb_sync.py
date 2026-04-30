@@ -6,9 +6,14 @@ import requests
 import time
 import json
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+import unicodedata
+from itertools import islice
 
 from .settings import get_igdb_credentials, get_setting, IGDB_MATCH_THRESHOLD
+from ..database import get_db
 
 # IGDB API endpoints
 TWITCH_TOKEN_URL = "https://id.twitch.tv/oauth2/token"
@@ -22,11 +27,42 @@ POPULARITY_TYPE_IGDB_PLAYED = 4
 POPULARITY_TYPE_STEAM_PEAK_24H = 5
 POPULARITY_TYPE_STEAM_POSITIVE_REVIEWS = 6
 
+_BATCH = 10
+
+# Global synchronization primitives
+db_lock = threading.Lock()
+
+class RateLimiter:
+    """Thread-safe Token Bucket rate limiter for IGDB API (4 req/s)."""
+    def __init__(self, rate=4.0, capacity=4.0):
+        self.rate = rate
+        self.capacity = capacity
+        self.tokens = capacity
+        self.last_update = time.time()
+        self.lock = threading.Lock()
+
+    def wait_for_token(self):
+        """Block until a token is available."""
+        while True:
+            with self.lock:
+                now = time.time()
+                elapsed = now - self.last_update
+                self.tokens = min(self.capacity, self.tokens + elapsed * self.rate)
+                self.last_update = now
+
+                if self.tokens >= 1.0:
+                    self.tokens -= 1.0
+                    return
+
+            time.sleep(0.1)
 
 class IGDBClient:
     def __init__(self):
         self.access_token = None
         self.token_expires_at = 0
+        self.token_lock = threading.Lock()
+        self.rate_limiter = RateLimiter(rate=4.0, capacity=4.0)
+        
         creds = get_igdb_credentials()
         self.client_id = creds.get("client_id")
         self.client_secret = creds.get("client_secret")
@@ -58,13 +94,17 @@ class IGDBClient:
         print(f"Got IGDB access token (expires in {data['expires_in'] // 3600} hours)")
 
     def _ensure_token(self):
-        """Ensure we have a valid access token."""
+        """Ensure we have a valid access token (thread-safe)."""
         if time.time() >= self.token_expires_at:
-            self._get_access_token()
+            with self.token_lock:
+                # Double-check after acquiring lock
+                if time.time() >= self.token_expires_at:
+                    self._get_access_token()
 
     def _request(self, endpoint, body):
-        """Make a request to the IGDB API."""
+        """Make a request to the IGDB API with rate limiting."""
         self._ensure_token()
+        self.rate_limiter.wait_for_token()
 
         response = requests.post(
             f"{IGDB_API_URL}/{endpoint}",
@@ -82,6 +122,13 @@ class IGDBClient:
             time.sleep(retry_after)
             return self._request(endpoint, body)
 
+        if response.status_code in (408, 504):
+            # Timeout - wait and retry
+            retry_after = int(response.headers.get("Retry-After", 1))
+            print(f"IGDB API timeout ({response.status_code}), waiting {retry_after}s...")
+            time.sleep(retry_after)
+            return self._request(endpoint, body)
+
         if response.status_code != 200:
             print(f"IGDB API error: {response.status_code} - {response.text}")
             return None
@@ -96,14 +143,14 @@ class IGDBClient:
         # Try exact name match first (avoids DLC variants crowding results)
         body = f'''
             where name = "{clean_name}";
-            fields id, name, slug, category, rating, rating_count, aggregated_rating,
+            fields id, name, slug, game_type, rating, rating_count, aggregated_rating,
                    aggregated_rating_count, total_rating, total_rating_count,
                    summary, storyline, first_release_date,
                    genres.name, themes.id, themes.name, platforms.name,
                    involved_companies.company.name, involved_companies.developer,
                    involved_companies.publisher,
                    cover.url, screenshots.url,
-                   external_games.uid, external_games.category,
+                   external_games.uid, external_games.external_game_source,
                    websites.url;
             limit 5;
         '''
@@ -114,14 +161,14 @@ class IGDBClient:
         # Fall back to fuzzy search with higher limit
         body = f'''
             search "{clean_name}";
-            fields id, name, slug, category, rating, rating_count, aggregated_rating,
+            fields id, name, slug, game_type, rating, rating_count, aggregated_rating,
                    aggregated_rating_count, total_rating, total_rating_count,
                    summary, storyline, first_release_date,
                    genres.name, themes.id, themes.name, platforms.name,
                    involved_companies.company.name, involved_companies.developer,
                    involved_companies.publisher,
                    cover.url, screenshots.url,
-                   external_games.uid, external_games.category,
+                   external_games.uid, external_games.external_game_source,
                    websites.url;
             limit 15;
         '''
@@ -135,7 +182,7 @@ class IGDBClient:
         """
         # Fast path: external_games has an indexed uid column
         body = f'''
-            where uid = "{steam_id}" & category = 1;
+            where uid = "{steam_id}" & external_game_source = 1;
             fields game;
             limit 1;
         '''
@@ -147,15 +194,15 @@ class IGDBClient:
 
         # Fallback: websites.url substring match — better coverage but slower
         body = f'''
-            where websites.url ~ *"steampowered.com/app/{steam_id}"*;
-            fields id, name, slug, rating, rating_count, aggregated_rating,
+            where websites.url ~ *"steampowered.com/app/{steam_id}"* & game_type = (0, 4, 6, 8, 9, 10, 11);
+            fields id, name, slug, game_type, rating, rating_count, aggregated_rating,
                    aggregated_rating_count, total_rating, total_rating_count,
-                   summary, storyline, first_release_date,
+                   summary, storyline, first_release_date, 
                    genres.name, themes.id, themes.name, platforms.name,
                    involved_companies.company.name, involved_companies.developer,
                    involved_companies.publisher,
                    cover.url, screenshots.url,
-                   external_games.uid, external_games.category,
+                   external_games.uid, external_games.external_game_source,
                    websites.url;
             limit 1;
         '''
@@ -167,15 +214,15 @@ class IGDBClient:
     def get_game_by_slug(self, slug):
         """Get a game by its store slug."""
         body = f'''
-            where slug = "{slug}";
-            fields id, name, slug, rating, rating_count, aggregated_rating,
+            where slug = "{slug}" & game_type = (0, 4, 6, 8, 9, 10, 11);
+            fields id, name, game_type, slug, rating, rating_count, aggregated_rating,
                    aggregated_rating_count, total_rating, total_rating_count,
                    summary, storyline, first_release_date,
                    genres.name, themes.id, themes.name, platforms.name,
                    involved_companies.company.name, involved_companies.developer,
                    involved_companies.publisher,
                    cover.url, screenshots.url,
-                   external_games.uid, external_games.category,
+                   external_games.uid, external_games.external_game_source,
                    websites.url;
             limit 1;
         '''
@@ -187,15 +234,15 @@ class IGDBClient:
         slug = re.sub(r'-[0-9a-f]{6}$', '', slug)
         
         body = f'''
-            where slug = "{slug}";
-            fields id, name, slug, rating, rating_count, aggregated_rating,
+            where slug = "{slug}" & game_type = (0, 4, 6, 8, 9, 10, 11);
+            fields id, name, slug, game_type, rating, rating_count, aggregated_rating,
                    aggregated_rating_count, total_rating, total_rating_count,
                    summary, storyline, first_release_date,
                    genres.name, themes.id, themes.name, platforms.name,
                    involved_companies.company.name, involved_companies.developer,
                    involved_companies.publisher,
                    cover.url, screenshots.url,
-                   external_games.uid, external_games.category,
+                   external_games.uid, external_games.external_game_source,
                    websites.url;
             limit 1;
         '''
@@ -209,14 +256,6 @@ class IGDBClient:
         """Get a game by its IGDB ID."""
         results = self.get_games_by_ids([igdb_id])
         return results[0] if results else None
-
-    def get_popularity_types(self):
-        """Get all available popularity types from IGDB."""
-        body = '''
-            fields id, name, created_at, updated_at;
-            limit 50;
-        '''
-        return self._request("popularity_types", body) or []
 
     def get_popular_games(self, game_ids, popularity_type=None, limit=50):
         """
@@ -259,150 +298,295 @@ class IGDBClient:
         ids_str = ",".join(str(id) for id in igdb_ids)
         body = f'''
             where id = ({ids_str});
-            fields id, name, slug, category, rating, rating_count, aggregated_rating,
+            fields id, name, slug, game_type, rating, rating_count, aggregated_rating,
                    aggregated_rating_count, total_rating, total_rating_count,
                    summary, storyline, first_release_date,
                    genres.name, themes.id, themes.name, platforms.name,
                    involved_companies.company.name, involved_companies.developer,
                    involved_companies.publisher,
                    cover.url, screenshots.url, artworks.url, videos.video_id,
-                   external_games.uid, external_games.category,
+                   external_games.uid, external_games.external_game_source,
                    websites.url;
             limit 500;
         '''
 
         return self._request("games", body) or []
 
-    def batch_lookup_steam(self, appids):
-        """Batch lookup games by Steam App IDs via website URL matching.
-
-        10 appids per request using OR queries. Better coverage than external_games.
-        Returns a dict mapping appid (str) -> game data dict.
+    def get_games_by_steam_ids(self, steam_ids):
         """
-        if not appids:
+        Batch version of get_game_by_steam_id.
+        Returns a dict mapping steam_id (str) -> game_data.
+        """
+        if not steam_ids:
             return {}
 
-        BATCH = 10
-        results = {}
-        total_batches = (len(appids) + BATCH - 1) // BATCH
+        final_results = {}
+        remaining_ids = set(str(sid) for sid in steam_ids)
 
-        for start in range(0, len(appids), BATCH):
-            batch_num = start // BATCH + 1
-            print(f"  Steam batch {batch_num}/{total_batches} ({len(results)} matched so far)...", flush=True)
-            chunk = appids[start:start + BATCH]
-            where_parts = " | ".join(
-                f'websites.url ~ *"steampowered.com/app/{appid}"*' for appid in chunk
-            )
-            body = f'''
-                where {where_parts};
-                fields id, name, slug, category, rating, rating_count, aggregated_rating,
+        # --- PATH 1: Fast Path (external_games endpoint) ---
+        # Construct: where (uid = "123" | uid = "456") & external_game_source = 1
+        uid_filter = " | ".join(f'uid = "{sid}"' for sid in remaining_ids)
+        ext_body = f'''
+            where ({uid_filter}) & external_game_source = 1;
+            fields game, uid;
+            limit {len(remaining_ids)};
+        '''
+        
+        ext_results = self._request("external_games", ext_body) or []
+        
+        # We need to fetch the actual game data for these IDs
+        if ext_results:
+            igdb_ids = [item.get("game") for item in ext_results if item.get("game")]
+            # Map uid back to the IGDB id for later correlation
+            uid_to_igdb = {str(item["uid"]): item["game"] for item in ext_results}
+            
+            # Batch fetch full game data by IGDB IDs
+            full_games = self.get_games_by_ids(igdb_ids) # Assuming you have/can make this
+            
+            # Correlate back to steam_id
+            for steam_id, igdb_id in uid_to_igdb.items():
+                for game in full_games:
+                    if game["id"] == igdb_id:
+                        final_results[steam_id] = game
+                        remaining_ids.discard(steam_id)
+                        break
+
+        # --- PATH 2: Fallback Path (websites.url match) ---
+        if remaining_ids:
+            # Construct: where (websites.url ~ *"app/123"* | websites.url ~ *"app/456"*)
+            url_filter = " | ".join(f'websites.url ~ *"steampowered.com/app/{sid}"*' for sid in remaining_ids)
+            
+            fallback_body = f'''
+                where ({url_filter}) & game_type = (0, 4, 6, 8, 9, 10, 11);
+                fields id, name, slug, game_type, total_rating, summary, 
+                    genres.name, platforms.name, cover.url,
+                    external_games.uid, external_games.external_game_source,
+                    websites.url;
+                limit {len(remaining_ids)};
+            '''
+            
+            fallback_games = self._request("games", fallback_body) or []
+            
+            # Use your regex logic to map these back to the correct Steam ID
+            for game in fallback_games:
+                # We use your existing extraction logic to identify which ID this match belongs to
+                extracted_id = self.extract_steam_app_id(game)
+                if extracted_id and extracted_id in remaining_ids:
+                    final_results[extracted_id] = game
+
+        return final_results
+
+    def get_games_by_epic_ids(self, skus, slugs):
+        """
+        skus: list of Epic Artifact/Catalog IDs (Source 26)
+        slugs: list of Epic Product Slugs (for URL fallback)
+        Returns a dict mapping the identifier found (sku or slug) to game data.
+        """
+        if not skus:
+            return {}
+
+        final_results = {}
+        # Create a mapping so Path 2 knows which slug belongs to which SKU
+        # We'll use this to "discard" games as we find them.
+        sku_to_slug = dict(zip(skus, slugs))
+        remaining_skus = set(skus)
+
+        # --- PATH 1: Fast Path (external_games endpoint) ---
+        # Query using Source 26 IDs
+        uid_filter = " | ".join(f'uid = "{sku}"' for sku in remaining_skus)
+        ext_body = f'''
+            where ({uid_filter}) & external_game_source = 26;
+            fields game, uid;
+            limit {len(remaining_skus)};
+        '''
+        
+        ext_results = self._request("external_games", ext_body) or []
+        
+        if ext_results:
+            igdb_ids = [item.get("game") for item in ext_results if item.get("game")]
+            uid_to_igdb = {str(item["uid"]): item["game"] for item in ext_results}
+            
+            # Batch fetch full game data
+            full_games = self.get_games_by_ids(igdb_ids)
+            
+            for found_sku, igdb_id in uid_to_igdb.items():
+                for game in full_games:
+                    if game["id"] == igdb_id:
+                        final_results[found_sku] = game
+                        remaining_skus.discard(found_sku)
+                        break
+
+        # --- PATH 2: Fallback Path (websites.url match via Slugs) ---
+        if remaining_skus:
+            # Get the slugs for the games we haven't found yet
+            remaining_slugs = [sku_to_slug[sku] for sku in remaining_skus if sku_to_slug[sku]]
+            
+            if remaining_slugs:
+                url_filter = " | ".join(f'websites.url ~ *"/p/{s}" | websites.url ~ *"/product/{s}"*' for s in remaining_slugs)
+                
+                # Note: Included game_type 14 (Update) for games like "Bad North Jotunn"
+                fallback_body = f'''
+                    where ({url_filter}) & game_type = (0, 4, 6, 8, 9, 10, 11);
+                    fields id, name, slug, game_type, rating, rating_count, aggregated_rating,
                        aggregated_rating_count, total_rating, total_rating_count,
                        summary, storyline, first_release_date,
                        genres.name, themes.id, themes.name, platforms.name,
                        involved_companies.company.name, involved_companies.developer,
                        involved_companies.publisher,
                        cover.url, screenshots.url,
-                       external_games.uid, external_games.category,
+                       external_games.uid, external_games.external_game_source,
                        websites.url;
-                limit {BATCH};
-            '''
-            games = self._request("games", body) or []
-            for game in games:
-                for website in game.get("websites", []):
-                    url = website.get("url", "")
-                    for appid in chunk:
-                        if re.search(rf"/app/{re.escape(str(appid))}(?:[/?#]|$)", url):
-                            results[str(appid)] = game
+                    limit 50;
+                '''
+                
+                fallback_games = self._request("games", fallback_body) or []
+                
+                for game in fallback_games:
+                    websites = game.get("websites", [])
+                    
+                    # Validation: Iterate through remaining games to find a strict match
+                    for sku in list(remaining_skus):
+                        slug = sku_to_slug[sku]
+                        if not slug: continue
+                        
+                        # HARDENING: Use Regex to ensure slug is a full path segment
+                        # This prevents 'ark' from matching 'arknights'
+                        # Checks for /p/ark/ or /p/ark? or /p/ark (end of string)
+                        pattern = rf"/(?:p|product)/{re.escape(slug)}(?:/|\?|$)"
+                        
+                        found_match = False
+                        for ws in websites:
+                            url = ws.get("url", "")
+                            if re.search(pattern, url):
+                                found_match = True
+                                break
+                                
+                        if found_match:
+                            final_results[sku] = game
+                            remaining_skus.discard(sku)
                             break
-            if start + BATCH < len(appids):
-                time.sleep(0.3)
-
-        print(f"  Steam batch done: {len(results)}/{len(appids)} matched")
-        return results
-
-    def batch_lookup_epic_slugs(self, slugs):
-        """Batch lookup Epic games via website URL matching on /p/{slug}.
-
-        Returns a dict mapping slug (str) -> game data dict.
-        """
-        if not slugs:
-            return {}
-
-        BATCH = 10
-        results = {}
-
-        for start in range(0, len(slugs), BATCH):
-            chunk = slugs[start:start + BATCH]
-            where_parts = " | ".join(
-                f'websites.url ~ *"/p/{slug}"*' for slug in chunk
-            )
-            body = f'''
-                where {where_parts};
-                fields id, name, slug, category, rating, rating_count, aggregated_rating,
+            if remaining_slugs:
+                url_filter = " | ".join(f'websites.url ~ *"/p/{s}" | websites.url ~ *"/product/{s}"*' for s in remaining_slugs)
+                
+                # Note: Included game_type 14 (Update) for games like "Bad North Jotunn"
+                fallback_body = f'''
+                    where ({url_filter});
+                    fields id, name, slug, game_type, rating, rating_count, aggregated_rating,
                        aggregated_rating_count, total_rating, total_rating_count,
                        summary, storyline, first_release_date,
                        genres.name, themes.id, themes.name, platforms.name,
                        involved_companies.company.name, involved_companies.developer,
                        involved_companies.publisher,
                        cover.url, screenshots.url,
-                       external_games.uid, external_games.category,
+                       external_games.uid, external_games.external_game_source,
                        websites.url;
-                limit {BATCH};
-            '''
-            games = self._request("games", body) or []
-            for game in games:
-                for website in game.get("websites", []):
-                    url = website.get("url", "")
-                    for s in chunk:
-                        if re.search(rf"/p/{re.escape(s)}(?:[/?#]|$)", url):
-                            results[s] = game
+                    limit 50;
+                '''
+                
+                fallback_games = self._request("games", fallback_body) or []
+                
+                for game in fallback_games:
+                    websites = game.get("websites", [])
+                    
+                    # Validation: Iterate through remaining games to find a strict match
+                    for sku in list(remaining_skus):
+                        slug = sku_to_slug[sku]
+                        if not slug: continue
+                        
+                        # HARDENING: Use Regex to ensure slug is a full path segment
+                        # This prevents 'ark' from matching 'arknights'
+                        # Checks for /p/ark/ or /p/ark? or /p/ark (end of string)
+                        pattern = rf"/(?:p|product)/{re.escape(slug)}(?:/|\?|$)"
+                        
+                        found_match = False
+                        for ws in websites:
+                            url = ws.get("url", "")
+                            if re.search(pattern, url):
+                                found_match = True
+                                break
+                                
+                        if found_match:
+                            final_results[sku] = game
+                            remaining_skus.discard(sku)
                             break
-            if start + BATCH < len(slugs):
-                time.sleep(0.3)
+        return final_results
 
-        return results
-
-    def batch_lookup_gog_slugs(self, slugs):
-        """Batch lookup GOG games via website URL matching on /game/{slug}.
-
-        Returns a dict mapping slug (str) -> game data dict.
+    def get_games_by_gog_ids(self, sids, slugs):
         """
-        if not slugs:
+        sids: list of GOG Artifact/Catalog IDs (Source 26)
+        slugs: list of GOG Product Slugs (for URL fallback)
+        Returns a dict mapping the identifier found (sku or slug) to game data.
+        """
+        if not sids:
             return {}
 
-        BATCH = 10
-        results = {}
+        final_results = {}
+        # Create a mapping so Path 2 knows which slug belongs to which SKU
+        # We'll use this to "discard" games as we find them.
+        sid_to_slug = dict(zip(sids, slugs))
+        remaining_sids = set(sids)
 
-        for start in range(0, len(slugs), BATCH):
-            chunk = slugs[start:start + BATCH]
-            where_parts = " | ".join(
-                f'websites.url ~ *"/game/{slug}"*' for slug in chunk
-            )
-            body = f'''
-                where {where_parts};
-                fields id, name, slug, category, rating, rating_count, aggregated_rating,
+        # --- PATH 1: Fast Path (external_games endpoint) ---
+        # Query using Source 26 IDs
+        uid_filter = " | ".join(f'uid = "{sid}"' for sid in remaining_sids)
+        ext_body = f'''
+            where ({uid_filter}) & external_game_source = 5;
+            fields game, uid;
+            limit {len(remaining_sids)};
+        '''
+        
+        ext_results = self._request("external_games", ext_body) or []
+        
+        if ext_results:
+            igdb_ids = [item.get("game") for item in ext_results if item.get("game")]
+            uid_to_igdb = {str(item["uid"]): item["game"] for item in ext_results}
+            
+            # Batch fetch full game data
+            full_games = self.get_games_by_ids(igdb_ids)
+            
+            for found_sid, igdb_id in uid_to_igdb.items():
+                for game in full_games:
+                    if game["id"] == igdb_id:
+                        final_results[found_sid] = game
+                        remaining_sids.discard(found_sid)
+                        break
+
+        # --- PATH 2: Fallback Path (websites.url match via Slugs) ---
+        if remaining_sids:
+            # Get the slugs for the games we haven't found yet
+            remaining_slugs = [sid_to_slug[sid] for sid in remaining_sids if sid_to_slug[sid]]
+            
+            if remaining_slugs:
+                url_filter = " | ".join(f'websites.url ~ *"/game/{s}"*' for s in remaining_slugs)
+                
+                # Note: Included game_type 14 (Update) for games like "Bad North Jotunn"
+                fallback_body = f'''
+                    where ({url_filter}) & game_type = (0, 4, 6, 8, 9, 10, 11);
+                    fields id, name, slug, game_type, rating, rating_count, aggregated_rating,
                        aggregated_rating_count, total_rating, total_rating_count,
                        summary, storyline, first_release_date,
                        genres.name, themes.id, themes.name, platforms.name,
                        involved_companies.company.name, involved_companies.developer,
                        involved_companies.publisher,
                        cover.url, screenshots.url,
-                       external_games.uid, external_games.category,
+                       external_games.uid, external_games.external_game_source,
                        websites.url;
-                limit {BATCH};
-            '''
-            games = self._request("games", body) or []
-            for game in games:
-                for website in game.get("websites", []):
-                    url = website.get("url", "")
-                    for s in chunk:
-                        if re.search(rf"/game/{re.escape(s)}(?:[/?#]|$)", url):
-                            results[s] = game
-                            break
-            if start + BATCH < len(slugs):
-                time.sleep(0.3)
-
-        return results
+                    limit {len(remaining_slugs)};
+                '''
+                
+                fallback_games = self._request("games", fallback_body) or []
+                
+                for game in fallback_games:
+                    for website in game.get("websites", []):
+                        url = website.get("url", "")
+                        # Match the found game back to the original SID/Slug
+                        for sid in list(remaining_sids):
+                            slug = sid_to_slug[sid]
+                            if f"/p/{slug}" in url or f"/product/{slug}" in url:
+                                final_results[sid] = game
+                                remaining_sids.discard(sid)
+                                break
+        return final_results
 
     def batch_lookup_slugs(self, slugs):
         """Batch lookup games by derived IGDB slugs (where slug = (...)).
@@ -420,15 +604,15 @@ class IGDBClient:
             chunk = slug_list[start:start + BATCH]
             slugs_str = ",".join(f'"{s}"' for s in chunk)
             body = f'''
-                where slug = ({slugs_str});
-                fields id, name, slug, category, rating, rating_count, aggregated_rating,
+                where slug = ({slugs_str}) ;
+                fields id, name, slug, game_type, rating, rating_count, aggregated_rating,
                        aggregated_rating_count, total_rating, total_rating_count,
                        summary, storyline, first_release_date,
                        genres.name, themes.id, themes.name, platforms.name,
                        involved_companies.company.name, involved_companies.developer,
                        involved_companies.publisher,
                        cover.url, screenshots.url,
-                       external_games.uid, external_games.category,
+                       external_games.uid, external_games.external_game_source,
                        websites.url;
                 limit {BATCH};
             '''
@@ -449,6 +633,7 @@ class IGDBClient:
         if not name:
             return None
         slug = name.lower()
+        slug = re.sub(r"&", "and", slug)
         slug = re.sub(r"[^a-z0-9]+", "-", slug)
         slug = slug.strip("-")
         return slug or None
@@ -471,7 +656,7 @@ class IGDBClient:
     def extract_steam_app_id(game_data):
         """Extract Steam App ID from IGDB external_games data.
 
-        IGDB external_games category 1 = Steam
+        IGDB external_games external_game_source 1 = Steam
         Returns the Steam App ID as a string, or None if not found.
         """
         if not game_data:
@@ -479,8 +664,8 @@ class IGDBClient:
 
         external_games = game_data.get("external_games", [])
         for ext_game in external_games:
-            # Category 1 = Steam
-            if ext_game.get("category") == 1:
+            # external_game_source 1 = Steam
+            if ext_game.get("external_game_source") == 1:
                 return str(ext_game.get("uid"))
 
         urls = game_data.get("websites", [])
@@ -493,29 +678,14 @@ class IGDBClient:
         return None
 
     def _clean_game_name(self, name):
-        """Clean game name for better search matching."""
-        if not name:
-            return ""
-
-        # Remove common suffixes/prefixes that hurt matching
-        patterns_to_remove = [
-            r"\s*\(.*?\)",  # Remove parenthetical content
-            r"\s*-\s*Demo$",
-            r"\s*Demo$",
-            r"\s*\[.*?\]",  # Remove bracketed content
-            r"™",
-            r"®",
-            r"©",
-        ]
-
-        clean = name
-        for pattern in patterns_to_remove:
-            clean = re.sub(pattern, "", clean, flags=re.IGNORECASE)
-
-        # Remove double quotes — they break the IGDB search "..." query syntax
-        clean = clean.replace('"', '')
-
-        return clean.strip()
+        if not name: return ""
+    
+        name = re.sub(r"[\(\[].*?[\)\]]", "", name)
+        name = unicodedata.normalize('NFKD', name).encode('ascii', 'ignore').decode('ascii')
+        name = name.lower()
+        name = re.sub(r"[^a-z0-9\s]", " ", name)
+        
+        return " ".join(name.split()).strip()
 
 
 def extract_genres_and_themes(igdb_data):
@@ -585,170 +755,275 @@ def apply_igdb_data(conn, game_id, igdb_game, existing_genres=None):
         igdb_game: IGDB game data dict
         existing_genres: Optional pre-fetched genres JSON string; fetched from DB if None
     """
-    cursor = conn.cursor()
+    with db_lock:
+        cursor = conn.cursor()
 
-    # Extract cover URL
-    cover_url = None
-    if igdb_game.get("cover"):
-        cover_url = igdb_game["cover"].get("url", "")
-        cover_url = cover_url.replace("t_thumb", "t_cover_big")
-        if cover_url and not cover_url.startswith("http"):
-            cover_url = "https:" + cover_url
+        # Extract cover URL
+        cover_url = None
+        if igdb_game.get("cover"):
+            cover_url = igdb_game["cover"].get("url", "")
+            cover_url = cover_url.replace("t_thumb", "t_cover_big")
+            if cover_url and not cover_url.startswith("http"):
+                cover_url = "https:" + cover_url
 
-    # Extract up to 5 screenshot URLs
-    screenshots = []
-    if igdb_game.get("screenshots"):
-        for screenshot in igdb_game["screenshots"][:5]:
-            url = screenshot.get("url", "")
-            url = url.replace("t_thumb", "t_screenshot_big")
-            if url and not url.startswith("http"):
-                url = "https:" + url
-            screenshots.append(url)
+        # Extract up to 5 screenshot URLs
+        screenshots = []
+        if igdb_game.get("screenshots"):
+            for screenshot in igdb_game["screenshots"][:5]:
+                url = screenshot.get("url", "")
+                url = url.replace("t_thumb", "t_screenshot_big")
+                if url and not url.startswith("http"):
+                    url = "https:" + url
+                screenshots.append(url)
 
-    # Check if game is NSFW
-    is_nsfw = IGDBClient.is_nsfw(igdb_game)
+        # Check if game is NSFW
+        is_nsfw = IGDBClient.is_nsfw(igdb_game)
 
-    # Extract Steam App ID from IGDB external_games
-    steam_app_id = IGDBClient.extract_steam_app_id(igdb_game)
+        # Extract Steam App ID from IGDB external_games
+        steam_app_id = IGDBClient.extract_steam_app_id(igdb_game)
 
-    # Fetch existing genres if not provided, and check if already steam-synced
-    if existing_genres is None:
-        cursor.execute("SELECT genres, steam_synced_at FROM games WHERE id = ?", (game_id,))
-        row = cursor.fetchone()
-        existing_genres = row[0] if row else None
-        steam_synced = bool(row[1]) if row else False
-    else:
-        cursor.execute("SELECT steam_synced_at FROM games WHERE id = ?", (game_id,))
-        row = cursor.fetchone()
-        steam_synced = bool(row[0]) if row else False
+        # Fetch existing genres if not provided, and check if already steam-synced
+        if existing_genres is None:
+            cursor.execute("SELECT genres, steam_synced_at FROM games WHERE id = ?", (game_id,))
+            row = cursor.fetchone()
+            existing_genres = row[0] if row else None
+            steam_synced = bool(row[1]) if row else False
+        else:
+            cursor.execute("SELECT steam_synced_at FROM games WHERE id = ?", (game_id,))
+            row = cursor.fetchone()
+            steam_synced = bool(row[0]) if row else False
 
-    # Extract genres and themes from IGDB and merge with existing
-    igdb_tags = extract_genres_and_themes(igdb_game)
-    merged_genres = merge_and_dedupe_genres(existing_genres, igdb_tags)
+        # Extract genres and themes from IGDB and merge with existing
+        igdb_tags = extract_genres_and_themes(igdb_game)
+        merged_genres = merge_and_dedupe_genres(existing_genres, igdb_tags)
 
-    # If Steam has already synced this game, preserve its summary/cover/screenshots.
-    # Otherwise IGDB data takes priority and overwrites directly.
-    if steam_synced:
-        summary_expr = "summary = COALESCE(summary, ?)"
-        cover_expr   = "cover_url = COALESCE(cover_url, ?)"
-        shots_expr   = "screenshots = COALESCE(screenshots, ?)"
-    else:
-        summary_expr = "summary = ?"
-        cover_expr   = "cover_url = ?"
-        shots_expr   = "screenshots = ?"
+        # If Steam has already synced this game, preserve its summary/cover/screenshots.
+        # Otherwise IGDB data takes priority and overwrites directly.
+        if steam_synced:
+            summary_expr = "summary = COALESCE(summary, ?)"
+            cover_expr   = "cover_url = COALESCE(cover_url, ?)"
+            shots_expr   = "screenshots = COALESCE(screenshots, ?)"
+        else:
+            summary_expr = "summary = ?"
+            cover_expr   = "cover_url = ?"
+            shots_expr   = "screenshots = ?"
+        params = (
+                igdb_game.get("id"),
+                igdb_game.get("slug"),
+                igdb_game.get("rating"),
+                igdb_game.get("rating_count"),
+                igdb_game.get("aggregated_rating"),
+                igdb_game.get("aggregated_rating_count"),
+                igdb_game.get("total_rating"),
+                igdb_game.get("total_rating_count"),
+                igdb_game.get("summary"),
+                cover_url,
+                json.dumps(screenshots) if screenshots else None,
+                1 if is_nsfw else 0,
+                merged_genres,
+                steam_app_id,
+                igdb_game.get("first_release_date"),
+<<<<<<< HEAD
+                json.dumps(igdb_game) if igdb_game else None,
+=======
+>>>>>>> a3f69c5 (feat(sync): parallelize IGDB metadata synchronization)
+                game_id,
+            )
 
-    cursor.execute(
-        f"""UPDATE games SET
-            igdb_id = ?,
-            igdb_slug = ?,
-            igdb_rating = ?,
-            igdb_rating_count = ?,
-            aggregated_rating = ?,
-            aggregated_rating_count = ?,
-            total_rating = ?,
-            total_rating_count = ?,
-            {summary_expr},
-            {cover_expr},
-            {shots_expr},
-            igdb_matched_at = CURRENT_TIMESTAMP,
-            nsfw = ?,
-            genres = ?,
-            steam_app_id = COALESCE(steam_app_id, ?),
-            igdb_release_date = ?
-        WHERE id = ?""",
-        (
-            igdb_game.get("id"),
-            igdb_game.get("slug"),
-            igdb_game.get("rating"),
-            igdb_game.get("rating_count"),
-            igdb_game.get("aggregated_rating"),
-            igdb_game.get("aggregated_rating_count"),
-            igdb_game.get("total_rating"),
-            igdb_game.get("total_rating_count"),
-            igdb_game.get("summary"),
-            cover_url,
-            json.dumps(screenshots) if screenshots else None,
-            1 if is_nsfw else 0,
-            merged_genres,
-            steam_app_id,
-            igdb_game.get("first_release_date"),
-            game_id,
-        ),
-    )
+        query = f"""UPDATE games SET
+                igdb_id = ?,
+                igdb_slug = ?,
+                igdb_rating = ?,
+                igdb_rating_count = ?,
+                aggregated_rating = ?,
+                aggregated_rating_count = ?,
+                total_rating = ?,
+                total_rating_count = ?,
+                {summary_expr},
+                {cover_expr},
+                {shots_expr},
+                igdb_matched_at = CURRENT_TIMESTAMP,
+                nsfw = ?,
+                genres = ?,
+                steam_app_id = COALESCE(?, steam_app_id),
+<<<<<<< HEAD
+                igdb_release_date = ?,
+                igdb_debug_info = ?
+=======
+                igdb_release_date = ?
+>>>>>>> a3f69c5 (feat(sync): parallelize IGDB metadata synchronization)
+                WHERE id = ?"""
+        try:
+            cursor.execute( query, params)
+            conn.commit()
+        except Exception as db_err:
+            print(f"Database Error: {db_err}")
+            print(f"Param count: {len(params)}")
+            conn.rollback()
+            raise
 
-
-def calculate_match_score(game_name, igdb_result, game_release_year=None):
-    """Calculate how well an IGDB result matches our game.
-
-    Args:
-        game_name: The game name from our database
-        igdb_result: The IGDB search result dict
-        game_release_year: Optional release year (int) from the store's release_date
-    """
+def calculate_match_score(client, game_name, igdb_result):
     if not igdb_result or not game_name:
         return 0
 
-    igdb_name = igdb_result.get("name", "").lower()
-    our_name = game_name.lower()
+    igdb_name = client._clean_game_name(igdb_result.get("name", ""))
+    our_name = client._clean_game_name(game_name)
+    
+    our_tokens = set(our_name.split())
+    igdb_tokens = set(igdb_name.split())
+    
+    if not our_tokens: return 0
 
-    # Exact match
-    if our_name == igdb_name:
-        score = 100
-    # One contains the other
-    elif our_name in igdb_name or igdb_name in our_name:
-        score = 80
-        # Penalize when IGDB name is much longer — likely a DLC/expansion with the
-        # base game name as prefix (e.g. "100% OJ" vs "100% OJ: Krila & Kae")
-        len_ratio = len(our_name) / len(igdb_name)
-        if len_ratio < 0.85:
-            score -= 20
-    else:
-        # Check word overlap
-        our_words = set(re.findall(r"\w+", our_name))
-        igdb_words = set(re.findall(r"\w+", igdb_name))
+    intersection = our_tokens.intersection(igdb_tokens)
+    containment = len(intersection) / len(our_tokens)
+    
+    # Strictly reject if any part of our name is missing from IGDB result
+    if containment < 1.0:
+        return 0
 
-        if not our_words:
+    if len(our_tokens) == 1 or len(our_name) < 10:
+        if not igdb_name.startswith(our_name):
             return 0
 
-        overlap = len(our_words & igdb_words)
-        score = (overlap / len(our_words)) * 70
+    union = our_tokens.union(igdb_tokens)
+    jaccard = len(intersection) / len(union)
+    
+    game_type = igdb_result.get("game_type", 0)
+    
+    if our_name == igdb_name:
+        # Perfect match is always 100
+        score = 100.0
+    elif game_type == 0:
+        # It's the main game but with a subtitle (e.g., Warsaw -> Warsaw Rising)
+        # Score ranges from 70-95 based on how much "extra" text is in the title
+        score = 70.0 + (jaccard * 25.0)
+    elif game_type in [3, 8, 9, 10, 11, 12]:
+        # It's a Bundle/Remake/Remaster (Acceptable fallback)
+        # Score ranges from 40-65
+        score = 40.0 + (jaccard * 25.0)
+    else:
+        # DLCs/Episodes/Etc.
+        score = jaccard * 30.0
 
-    # Penalize DLC/addon/expansion/mod categories (IGDB category field)
-    # 0=main_game, 1=dlc_addon, 2=expansion, 5=mod, 6=episode, 7=season, 13=pack, 14=update
-    DLC_CATEGORIES = {1, 2, 5, 6, 7, 13, 14}
-    game_category = igdb_result.get("category")
-    if game_category in DLC_CATEGORIES:
-        score -= 30
+    return min(score, 100.0)
 
-    # Apply release year bonus/penalty if both sides have year data
-    if game_release_year and igdb_result.get("first_release_date"):
-        igdb_year = datetime.fromtimestamp(
-            igdb_result["first_release_date"], tz=timezone.utc
-        ).year
-        year_diff = abs(game_release_year - igdb_year)
+def _sync_steam_batch(client, steam_games_dict):
+    conn = get_db()
+    matched = 0
+    searched = 0
+    fallback = []
+    try:
+        appids = list(steam_games_dict.keys())
+        total_batches = (len(appids) + _BATCH - 1) // _BATCH
+        for start in range(0, len(appids), _BATCH):
+            chunk = appids[start:start + _BATCH]
+            games_matched = client.get_games_by_steam_ids(chunk)
+            for appid in chunk:
+                gid, name, store, existing_genres, rd, sid, _ = steam_games_dict[appid]
+                game_data = games_matched.get(str(appid))
+                if game_data:
+                    apply_igdb_data(conn, gid, game_data, existing_genres=existing_genres)
+                    matched += 1
+                else:
+                    fallback.append((gid, name, store, existing_genres, rd, sid, None))
+                searched += 1
+            time.sleep(0.1)
+    finally:
+        conn.close()
+    return matched, searched, fallback
 
-        if year_diff == 0:
-            score += 10
-        elif year_diff == 1:
-            pass  # No change - accounts for regional release differences
-        elif year_diff <= 3:
-            score -= 15
-        else:
-            score -= 30
+def _sync_gog_batch(client, gog_data_dict):
+    conn = get_db()
+    matched = 0
+    searched = 0
+    fallback = []
+    try:
+        all_sids = list(gog_data_dict.keys())
+        all_slugs = [gog_data_dict[s]["slug"] for s in all_sids]
+        for start in range(0, len(all_sids), _BATCH):
+            batch_sids = all_sids[start : start + _BATCH]
+            batch_slugs = all_slugs[start : start + _BATCH]
+            results = client.get_games_by_gog_ids(batch_sids, batch_slugs)
+            for sid in batch_sids:
+                local_game = gog_data_dict[sid]
+                game_data = results.get(sid)
+                if game_data:
+                    apply_igdb_data(conn, local_game["gid"], game_data, existing_genres=local_game["genres"])
+                    matched += 1
+                else:
+                    fallback.append((local_game["gid"], local_game["name"], "gog", local_game["genres"], local_game["rd"], sid, None))
+                searched += 1
+            time.sleep(0.1)
+    finally:
+        conn.close()
+    return matched, searched, fallback
 
-    return score
+def _sync_amazon_batch(client, amazon_data_dict):
+    conn = get_db()
+    matched = 0
+    searched = 0
+    fallback = []
+    try:
+        valid_sids = [s for s in amazon_data_dict.keys() if amazon_data_dict[s]["steam_appid"]]
+        # Non-steam amazon games go straight to fallback
+        for sid in amazon_data_dict:
+            if not amazon_data_dict[sid]["steam_appid"]:
+                local_game = amazon_data_dict[sid]
+                fallback.append((local_game["gid"], local_game["name"], "amazon", local_game["genres"], local_game["rd"], sid, None))
+                searched += 1
 
+        all_steam_appids = [amazon_data_dict[s]["steam_appid"] for s in valid_sids]
+        for start in range(0, len(valid_sids), _BATCH):
+            batch_sids = valid_sids[start : start + _BATCH]
+            batch_steam_appids = all_steam_appids[start : start + _BATCH]
+            results = client.get_games_by_steam_ids(batch_steam_appids)
+            for sid in batch_sids:
+                local_game = amazon_data_dict[sid]
+                game_data = results.get(str(local_game["steam_appid"]))
+                if game_data:
+                    apply_igdb_data(conn, local_game["gid"], game_data, existing_genres=local_game["genres"])
+                    matched += 1
+                else:
+                    fallback.append((local_game["gid"], local_game["name"], "amazon", local_game["genres"], local_game["rd"], sid, None))
+                searched += 1
+            time.sleep(0.1)
+    finally:
+        conn.close()
+    return matched, searched, fallback
+
+def _sync_epic_batch(client, epic_data_dict):
+    conn = get_db()
+    matched = 0
+    searched = 0
+    fallback = []
+    try:
+        all_sids = list(epic_data_dict.keys())
+        all_slugs = [epic_data_dict[s]["slug"] for s in all_sids]
+        for start in range(0, len(all_sids), _BATCH):
+            batch_sids = all_sids[start : start + _BATCH]
+            batch_slugs = all_slugs[start : start + _BATCH]
+            results = client.get_games_by_epic_ids(batch_sids, batch_slugs)
+            for sid in batch_sids:
+                local_game = epic_data_dict[sid]
+                game_data = results.get(sid)
+                if game_data:
+                    apply_igdb_data(conn, local_game["gid"], game_data, existing_genres=local_game["genres"])
+                    matched += 1
+                else:
+                    fallback.append((local_game["gid"], local_game["name"], "epic", local_game["genres"], local_game["rd"], sid, None))
+                searched += 1
+            time.sleep(0.1)
+    finally:
+        conn.close()
+    return matched, searched, fallback
+
+def chunk_dict(data, size):
+    it = iter(data)
+    for i in range(0, len(data), size):
+        yield {k: data[k] for k in islice(it, size)}
 
 def sync_games(conn, client, limit=None, force=False, progress_callback=None):
-    """Sync games with IGDB.
-
-    Args:
-        conn: Database connection
-        client: IGDBClient instance
-        limit: Maximum number of games to process
-        force: If True, resync all games; if False, only sync unmatched games
-        progress_callback: Optional callback function(current, total, message) for progress updates
-    """
+    """Sync games with IGDB using parallel store lookups."""
     cursor = conn.cursor()
 
     if force:
@@ -767,269 +1042,138 @@ def sync_games(conn, client, limit=None, force=False, progress_callback=None):
         games = games[:limit]
 
     total = len(games)
+    if total == 0:
+        return 0, 0
+        
     print(f"Processing {total} games...")
 
     matched = 0
-    failed = 0
+    searched = 0
+    fallback_pool = []
 
-    steam_games = [
-        (gid, name, store, genres, rd, sid, extra, sid if store == "steam" else appid)
-        for gid, name, store, genres, rd, sid, extra, appid in games
-        if store == "steam" or appid
-    ]
-    if steam_games:
-        print(f"Batch-resolving {len(steam_games)} Steam games...")
-        if progress_callback:
-            progress_callback(0, total, f"Batch-resolving {len(steam_games)} Steam games...")
-        appids = [appid for _, _, _, _, _, _, _, appid in steam_games]
-        appid_to_game = client.batch_lookup_steam(appids)
-        fallback_steam = []
-        for gid, name, store, existing_genres, rd, sid, _, appid in steam_games:
-            game_data = appid_to_game.get(str(appid))
-            if game_data:
-                apply_igdb_data(conn, gid, game_data, existing_genres=existing_genres)
-                conn.commit()
-                rating_str = f" (rating: {game_data['total_rating']:.1f})" if game_data.get("total_rating") else ""
-                print(f"  [{appid}] matched: {game_data['name']}{rating_str}")
-                matched += 1
-            else:
-                fallback_steam.append((gid, name, store, existing_genres, rd, sid, None))
-        if fallback_steam:
-            print(f"  {len(fallback_steam)} Steam games not found by URL, will try name search")
-    else:
-        fallback_steam = []
+    # Prepare store-specific data dictionaries
+    steam_dict = {}
+    gog_dict = {}
+    amazon_dict = {}
+    epic_dict = {}
+    other_games = []
 
-    steam_game_ids = {gid for gid, *_ in steam_games}
+    for gid, name, store, genres, rd, sid, extra_raw, appid in games:
+<<<<<<< HEAD
+        if store == "steam" or appid:
+=======
+        if store == "steam":
+>>>>>>> a3f69c5 (feat(sync): parallelize IGDB metadata synchronization)
+            steam_dict[str(sid if store == "steam" else appid)] = (gid, name, store, genres, rd, sid, extra_raw)
+        elif store == "gog":
+            slug = None
+            if extra_raw:
+                try:
+                    m = re.search(r"/game/([^/?#]+)", json.loads(extra_raw).get("store_url", ""))
+                    if m: slug = m.group(1)
+                except: pass
+            gog_dict[str(sid)] = {"gid": gid, "name": name, "slug": slug, "genres": genres, "rd": rd}
+        elif store == "amazon":
+            steam_appid = None
+            if extra_raw:
+                try:
+                    data = json.loads(extra_raw)
+                    url = data.get("product", {}).get("productDetail", {}).get("details", {}).get("websites", {}).get("STEAM")
+                    if url:
+                        m = re.search(r"/app/(\d+)", url)
+                        if m: steam_appid = m.group(1)
+                except: pass
+            amazon_dict[str(sid)] = {"gid": gid, "name": name, "steam_appid": steam_appid, "genres": genres, "rd": rd}
+        elif store == "epic":
+            slug = None
+            if extra_raw:
+                try: slug = json.loads(extra_raw).get("product_slug")
+                except: pass
+            epic_dict[str(sid)] = {"gid": gid, "name": name, "slug": slug, "genres": genres, "rd": rd}
+        else:
+            other_games.append((gid, name, store, genres, rd, sid, extra_raw))
 
-    epic_games = []
-    for gid, name, store, genres, rd, sid, extra_raw, _ in games:
-        if store != "epic" or gid in steam_game_ids:
-            continue
-        product_slug = None
-        if extra_raw:
-            try:
-                product_slug = json.loads(extra_raw).get("product_slug")
-            except (json.JSONDecodeError, TypeError):
-                pass
-        epic_games.append((gid, name, store, genres, rd, sid, product_slug))
+    # Dispatch parallel tasks
+    tasks = []
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        # Create chunks for each store
+        for chunk in chunk_dict(steam_dict, _BATCH):
+            tasks.append(executor.submit(_sync_steam_batch, client, chunk))
+        for chunk in chunk_dict(epic_dict, _BATCH):
+            tasks.append(executor.submit(_sync_epic_batch, client, chunk))
+        for chunk in chunk_dict(gog_dict, _BATCH):
+            tasks.append(executor.submit(_sync_gog_batch, client, chunk))
+        for chunk in chunk_dict(amazon_dict, _BATCH):
+            tasks.append(executor.submit(_sync_amazon_batch, client, chunk))
 
-    epic_with_slug = [(gid, n, s, g, rd, sid, slug) for gid, n, s, g, rd, sid, slug in epic_games if slug]
-    epic_no_slug   = [(gid, n, s, g, rd, sid, slug) for gid, n, s, g, rd, sid, slug in epic_games if not slug]
+        for future in as_completed(tasks):
+            m, s, fb = future.result()
+            matched += m
+            searched += s
+            fallback_pool.extend(fb)
+            if progress_callback:
+                progress_callback(searched, total, f"Parallel batch sync in progress")
 
-    if epic_with_slug:
-        print(f"Batch-resolving {len(epic_with_slug)} Epic games by slug URL...")
-        if progress_callback:
-            progress_callback(0, total, f"Batch-resolving {len(epic_with_slug)} Epic games...")
-        slugs = [slug for _, _, _, _, _, _, slug in epic_with_slug]
-        slug_to_game = client.batch_lookup_epic_slugs(slugs)
-        fallback_epic = list(epic_no_slug)
-        for gid, name, store, existing_genres, rd, sid, slug in epic_with_slug:
-            game_data = slug_to_game.get(slug)
-            if game_data:
-                apply_igdb_data(conn, gid, game_data, existing_genres=existing_genres)
-                conn.commit()
-                rating_str = f" (rating: {game_data['total_rating']:.1f})" if game_data.get("total_rating") else ""
-                print(f"  [{slug}] matched: {game_data['name']}{rating_str}")
-                matched += 1
-            else:
-                fallback_epic.append((gid, name, store, existing_genres, rd, sid, None))
-        if fallback_epic:
-            print(f"  {len(fallback_epic)} Epic games not found by slug, will try name search")
-    else:
-        fallback_epic = list(epic_no_slug)
+    # Add other_games to fallback pool
+    fallback_pool.extend(other_games)
 
-    gog_games = []
-    for gid, name, store, genres, rd, sid, extra_raw, _ in games:
-        if store != "gog" or gid in steam_game_ids:
-            continue
-        gog_slug = None
-        if extra_raw:
-            try:
-                store_url = json.loads(extra_raw).get("store_url", "")
-                m = re.search(r"/game/([^/?#]+)", store_url)
-                if m:
-                    gog_slug = m.group(1)
-            except (json.JSONDecodeError, TypeError):
-                pass
-        gog_games.append((gid, name, store, genres, rd, sid, gog_slug))
-
-    gog_with_slug = [(gid, n, s, g, rd, sid, slug) for gid, n, s, g, rd, sid, slug in gog_games if slug]
-    gog_no_slug   = [(gid, n, s, g, rd, sid, slug) for gid, n, s, g, rd, sid, slug in gog_games if not slug]
-
-    if gog_with_slug:
-        print(f"Batch-resolving {len(gog_with_slug)} GOG games by slug URL...")
-        if progress_callback:
-            progress_callback(0, total, f"Batch-resolving {len(gog_with_slug)} GOG games...")
-        slugs = [slug for _, _, _, _, _, _, slug in gog_with_slug]
-        slug_to_game = client.batch_lookup_gog_slugs(slugs)
-        fallback_gog = list(gog_no_slug)
-        for gid, name, store, existing_genres, rd, sid, slug in gog_with_slug:
-            game_data = slug_to_game.get(slug)
-            if game_data:
-                apply_igdb_data(conn, gid, game_data, existing_genres=existing_genres)
-                conn.commit()
-                rating_str = f" (rating: {game_data['total_rating']:.1f})" if game_data.get("total_rating") else ""
-                print(f"  [{slug}] matched: {game_data['name']}{rating_str}")
-                matched += 1
-            else:
-                fallback_gog.append((gid, name, store, existing_genres, rd, sid, None))
-        if fallback_gog:
-            print(f"  {len(fallback_gog)} GOG games not found by slug, will try name search")
-    else:
-        fallback_gog = list(gog_no_slug)
-
-    amazon_games = []
-    for gid, name, store, genres, rd, sid, extra_raw, _ in games:
-        if store != "amazon" or gid in steam_game_ids:
-            continue
-        steam_appid = None
-        if extra_raw:
-            try:
-                data = json.loads(extra_raw)
-                steam_url = (
-                    data.get("product", {})
-                        .get("productDetail", {})
-                        .get("details", {})
-                        .get("websites", {})
-                        .get("STEAM")
-                )
-                if steam_url:
-                    m = re.search(r"/app/(\d+)", steam_url)
-                    if m:
-                        steam_appid = m.group(1)
-            except (json.JSONDecodeError, TypeError):
-                pass
-        amazon_games.append((gid, name, store, genres, rd, sid, steam_appid))
-
-    amazon_with_appid = [(gid, n, s, g, rd, sid, appid) for gid, n, s, g, rd, sid, appid in amazon_games if appid]
-    amazon_no_appid   = [(gid, n, s, g, rd, sid, appid) for gid, n, s, g, rd, sid, appid in amazon_games if not appid]
-
-    if amazon_with_appid:
-        print(f"Batch-resolving {len(amazon_with_appid)} Amazon games via Steam appid...")
-        if progress_callback:
-            progress_callback(0, total, f"Batch-resolving {len(amazon_with_appid)} Amazon games...")
-        appids = [appid for _, _, _, _, _, _, appid in amazon_with_appid]
-        appid_to_game = client.batch_lookup_steam(appids)
-        fallback_amazon = list(amazon_no_appid)
-        for gid, name, store, existing_genres, rd, sid, appid in amazon_with_appid:
-            game_data = appid_to_game.get(str(appid))
-            if game_data:
-                apply_igdb_data(conn, gid, game_data, existing_genres=existing_genres)
-                conn.commit()
-                rating_str = f" (rating: {game_data['total_rating']:.1f})" if game_data.get("total_rating") else ""
-                print(f"  [{appid}] matched: {game_data['name']}{rating_str}")
-                matched += 1
-            else:
-                fallback_amazon.append((gid, name, store, existing_genres, rd, sid, None))
-        if fallback_amazon:
-            print(f"  {len(fallback_amazon)} Amazon games not found by Steam appid, will try name search")
-    else:
-        fallback_amazon = list(amazon_no_appid)
-
-    batch_resolved_ids = (
-        {g[0] for g in steam_games} |
-        {g[0] for g in epic_games} |
-        {g[0] for g in gog_games} |
-        {g[0] for g in amazon_games}
-    )
-    other_games = [
-        (gid, name, store, genres, rd, sid, extra)
-        for gid, name, store, genres, rd, sid, extra, _ in games
-        if gid not in batch_resolved_ids
-    ]
-    slug_fallback_pool = fallback_steam + fallback_epic + fallback_gog + fallback_amazon + other_games
-
-    slug_map = {}   # candidate_slug -> [(game_id, name, existing_genres, release_date)]
+    print(f"Fallback pool: {fallback_pool}")
+    # Slug fallback (batch)
+    slug_map = {}
     no_slug_games = []
-    for gid, name, store, existing_genres, rd, sid, _ in slug_fallback_pool:
+    for gid, name, store, existing_genres, rd, sid, _ in fallback_pool:
         candidate = IGDBClient.derive_igdb_slug(client._clean_game_name(name))
         if candidate:
             slug_map.setdefault(candidate, []).append((gid, name, existing_genres, rd))
         else:
             no_slug_games.append((gid, name, store, existing_genres, rd, sid, None))
 
-    slug_to_game = {}
     if slug_map:
         print(f"Batch slug lookup for {len(slug_map)} unique slugs...")
-        if progress_callback:
-            progress_callback(0, total, f"Batch slug lookup ({len(slug_map)} slugs)...")
         slug_to_game = client.batch_lookup_slugs(slug_map.keys())
+        for candidate_slug, game_list in slug_map.items():
+            game_data = slug_to_game.get(candidate_slug)
+            for gid, name, existing_genres, rd in game_list:
+                if game_data:
+                    apply_igdb_data(conn, gid, game_data, existing_genres=existing_genres)
+                    matched += 1
+                else:
+                    no_slug_games.append((gid, name, None, existing_genres, rd, None, None))
 
-    sequential_games = []
-    for candidate_slug, game_list in slug_map.items():
-        game_data = slug_to_game.get(candidate_slug)
-        for gid, name, existing_genres, rd in game_list:
-            if game_data:
-                apply_igdb_data(conn, gid, game_data, existing_genres=existing_genres)
-                conn.commit()
-                rating_str = f" (rating: {game_data['total_rating']:.1f})" if game_data.get("total_rating") else ""
-                print(f"  [{candidate_slug}] slug matched: {game_data['name']}{rating_str}")
-                matched += 1
-            else:
-                sequential_games.append((gid, name, None, existing_genres, rd, None, None))
-
-    sequential_games.extend(no_slug_games)
-
-    min_match_score = int(get_setting(IGDB_MATCH_THRESHOLD, "50"))
-    seq_total = len(sequential_games)
+    # Sequential name search for remaining
+    min_match_score = int(get_setting(IGDB_MATCH_THRESHOLD, "100"))
+    seq_total = len(no_slug_games)
+    failed = 0
     if seq_total:
         print(f"Name search for {seq_total} remaining unmatched games...")
 
-    for i, (gid, name, store, existing_genres, rd, sid, _) in enumerate(sequential_games):
-        print(f"[{i+1}/{seq_total}] Searching for: {name}...", end=" ", flush=True)
-
+    for i, (gid, name, store, existing_genres, rd, sid, _) in enumerate(no_slug_games):
         if progress_callback:
-            done = total - seq_total + i
-            progress_callback(done + 1, total, f"Processing: {name[:50]}...")
-
-        game_release_year = None
-        if rd:
-            try:
-                game_release_year = int(str(rd)[:4])
-            except (ValueError, IndexError):
-                pass
-
+            progress_callback(total - seq_total + i + 1, total, f"Processing: {name[:50]}...")
+            
         try:
             results = client.search_game(name)
-
-            if not results:
-                print("No results")
-                cursor.execute(
-                    "UPDATE games SET igdb_id = 0, igdb_matched_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (gid,)
-                )
-                conn.commit()
-                failed += 1
-                time.sleep(0.3)
-                continue
-
             best_match = None
             best_score = 0
-            for result in results:
-                score = calculate_match_score(name, result, game_release_year)
-                if score > best_score:
-                    best_score = score
-                    best_match = result
+            if results:
+                for result in results:
+                    score = calculate_match_score(client, name, result)
+                    if score > best_score:
+                        best_score = score
+                        best_match = result
 
             if best_match and best_score >= min_match_score:
                 apply_igdb_data(conn, gid, best_match, existing_genres=existing_genres)
-                conn.commit()
-                rating_str = f" (rating: {best_match['total_rating']:.1f})" if best_match.get("total_rating") else ""
-                print(f"matched: {best_match['name']} (score: {best_score:.0f}){rating_str}")
                 matched += 1
+                print(f"  [{i+1}/{seq_total}] matched: {name} (score: {best_score:.0f})")
             else:
-                print(f"No good match (best score: {best_score:.0f})")
-                cursor.execute(
-                    "UPDATE games SET igdb_id = 0, igdb_matched_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (gid,)
-                )
-                conn.commit()
+                with db_lock:
+                    cursor.execute("UPDATE games SET igdb_id = 0, igdb_matched_at = CURRENT_TIMESTAMP WHERE id = ?", (gid,))
+                    conn.commit()
                 failed += 1
-
-            time.sleep(0.3)
-
+                print(f"  [{i+1}/{seq_total}] no match: {name}")
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"Error searching {name}: {e}")
             failed += 1
 
     return matched, failed
