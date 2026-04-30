@@ -199,8 +199,6 @@ class MetacriticClient:
         return clean.strip()
 
 
-class MetacriticClient:
-
 def calculate_match_score(game_name, metacritic_result):
     """Calculate how well a Metacritic result matches our game."""
     if not metacritic_result or not game_name:

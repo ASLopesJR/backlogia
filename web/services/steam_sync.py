@@ -10,8 +10,6 @@ from threading import Lock
 
 import requests
 
-from .database_builder import add_steam_synced_at_column
-
 # Rate limiting for Steam Store API
 _rate_limit_lock = Lock()
 _last_request_time = 0
@@ -175,8 +173,6 @@ def sync_steam_store_info(conn, force=False, max_workers=5, progress_callback=No
         (updated, failed) counts
     """
     cursor = conn.cursor()
-
-    add_steam_synced_at_column(conn)
 
     if force:
         cursor.execute(
