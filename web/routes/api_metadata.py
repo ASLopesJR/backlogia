@@ -133,6 +133,7 @@ def update_igdb(game_id: int, body: UpdateIgdbRequest, conn: sqlite3.Connection 
     except HTTPException:
         raise
     except Exception as e:
+        print(e)
         raise HTTPException(status_code=500, detail=f"Failed to fetch from IGDB: {str(e)}")
 
 
