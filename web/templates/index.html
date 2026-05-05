@@ -1503,18 +1503,18 @@
                 <option value="name-desc" {% if current_sort == 'name' and current_order == 'desc' %}selected{% endif %}>Name (Z-A)</option>
                 <option value="igdb_release_date-asc" {% if current_sort == 'igdb_release_date' and current_order == 'asc' %}selected{% endif %}>Release Date (Oldest-Newest)</option>
                 <option value="igdb_release_date-desc" {% if current_sort == 'igdb_release_date' and current_order == 'desc' %}selected{% endif %}>Release Date (Newest-Oldest)</option>
-                <option value="average_rating-desc" {% if current_sort == 'average_rating' %}selected{% endif %}>Average Rating (High-Low)</option>
-                <option value="critics_score-desc" {% if current_sort == 'critics_score' %}selected{% endif %}>Steam Rating (High-Low)</option>
+                <option value="average_rating-desc" {% if current_sort == 'average_rating' and current_order == 'desc' %}selected{% endif %}>Average Rating (High-Low)</option>
+                <option value="critics_score-desc" {% if current_sort == 'critics_score' and current_order == 'desc' %}selected{% endif %}>Steam Rating (High-Low)</option>
                 {% if 'metacritic_score' in available_sorts %}
-                <option value="metacritic_score-desc" {% if current_sort == 'metacritic_score' %}selected{% endif %}>Metacritic Score (High-Low)</option>
+                <option value="metacritic_score-desc" {% if current_sort == 'metacritic_score' and current_order == 'desc' %}selected{% endif %}>Metacritic Score (High-Low)</option>
                 {% endif %}
                 {% if 'metacritic_user_score' in available_sorts %}
-                <option value="metacritic_user_score-desc" {% if current_sort == 'metacritic_user_score' %}selected{% endif %}>Metacritic User Score (High-Low)</option>
+                <option value="metacritic_user_score-desc" {% if current_sort == 'metacritic_user_score' and current_order == 'desc' %}selected{% endif %}>Metacritic User Score (High-Low)</option>
                 {% endif %}
-                <option value="total_rating-desc" {% if current_sort == 'total_rating' %}selected{% endif %}>IGDB Rating (High-Low)</option>
-                <option value="igdb_rating-desc" {% if current_sort == 'igdb_rating' %}selected{% endif %}>IGDB User Rating (High-Low)</option>
-                <option value="aggregated_rating-desc" {% if current_sort == 'aggregated_rating' %}selected{% endif %}>IGDB Critic Rating (High-Low)</option>
-                <option value="playtime_hours-desc" {% if current_sort == 'playtime_hours' %}selected{% endif %}>Most Played</option>
+                <option value="total_rating-desc" {% if current_sort == 'total_rating' and current_order == 'desc' %}selected{% endif %}>IGDB Rating (High-Low)</option>
+                <option value="igdb_rating-desc" {% if current_sort == 'igdb_rating' and current_order == 'desc' %}selected{% endif %}>IGDB User Rating (High-Low)</option>
+                <option value="aggregated_rating-desc" {% if current_sort == 'aggregated_rating' and current_order == 'desc' %}selected{% endif %}>IGDB Critic Rating (High-Low)</option>
+                <option value="playtime_hours-desc" {% if current_sort == 'playtime_hours' and current_order == 'desc' %}selected{% endif %}>Most Played</option>
             </select>
 
             {% set has_any_filter = current_stores or current_genres or current_search or current_exclude_streaming or current_protondb_tier or current_no_igdb or current_no_steam or current_playtime_labels or current_collections_include or current_collections_exclude or (current_sort != 'name') or (current_sort == 'name' and current_order != 'asc') %}
@@ -2382,7 +2382,9 @@
         }
 
         function applySort(value) {
-            const [sort, order] = value.split('-');
+            const splitIndex = value.lastIndexOf('-');
+            const sort = splitIndex >= 0 ? value.slice(0, splitIndex) : value;
+            const order = splitIndex >= 0 ? value.slice(splitIndex + 1) : 'asc';
             const stores = [{% for store in current_stores %}'{{ store }}'{% if not loop.last %}, {% endif %}{% endfor %}];
             const genres = [{% for genre in current_genres %}'{{ genre }}'{% if not loop.last %}, {% endif %}{% endfor %}];
             const search = '{{ current_search }}';

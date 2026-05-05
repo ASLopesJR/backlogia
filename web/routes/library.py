@@ -48,6 +48,14 @@ def library(
     """Library page - list all games."""
     cursor = conn.cursor()
 
+    # Backward/URL compatibility: accept combined sort token like
+    # `sort=average_rating-desc` when `order` is not explicitly provided.
+    if "-" in sort and order == "asc":
+        maybe_sort, maybe_order = sort.rsplit("-", 1)
+        if maybe_order in ("asc", "desc"):
+            sort = maybe_sort
+            order = maybe_order
+
     # Build query (exclude Amazon Prime/Luna duplicates and hidden games)
     query = "SELECT * FROM games WHERE 1=1" + EXCLUDE_HIDDEN_FILTER
     params = []
@@ -135,6 +143,9 @@ def library(
     existing_columns = {row[1] for row in cursor.fetchall()}
     valid_sorts = ["name", "store", "playtime_hours", "critics_score", "release_date", "total_rating", "igdb_rating", "aggregated_rating", "average_rating", "metacritic_score", "metacritic_user_score", "igdb_release_date"]
     available_sorts = [s for s in valid_sorts if s in existing_columns]
+    if order not in ("asc", "desc"):
+        order = "asc"
+
     if sort not in available_sorts:
         sort = "name"
     if sort in available_sorts:
