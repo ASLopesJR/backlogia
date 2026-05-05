@@ -16,6 +16,7 @@ from fastapi.templating import Jinja2Templates
 from ..dependencies import get_db
 from ..utils.filters import EXCLUDE_HIDDEN_FILTER, EXCLUDE_DUPLICATES_FILTER, PLAYTIME_LABELS
 from ..utils.helpers import parse_json_field, get_store_url, group_games_by_igdb, escape_like
+from ..utils.ratings import effective_steam_score, steam_total_reviews_from_extra, calculate_effective_average_rating, igdb_bayesian_rating
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
@@ -187,6 +188,31 @@ def library(
     def effective_sort_value(game: dict, field: str):
         """Return the value used for sorting, applying label-based fallback for playtime_hours."""
         val = game.get(field)
+        if field == "critics_score":
+            total_reviews = steam_total_reviews_from_extra(game.get("extra_data"))
+            return effective_steam_score(val, total_reviews)
+        if field in ("igdb_rating", "aggregated_rating", "total_rating"):
+            count_field = field.replace("rating", "rating_count") if field == "igdb_rating" else field.replace("rating", "rating_count")
+            count_field = {
+                "igdb_rating": "igdb_rating_count",
+                "aggregated_rating": "aggregated_rating_count",
+                "total_rating": "total_rating_count",
+            }[field]
+            return igdb_bayesian_rating(val, game.get(count_field))
+        if field == "average_rating":
+            total_reviews = steam_total_reviews_from_extra(game.get("extra_data"))
+            return calculate_effective_average_rating(
+                critics_score=game.get("critics_score"),
+                steam_total_reviews=total_reviews,
+                igdb_rating=game.get("igdb_rating"),
+                igdb_rating_count=game.get("igdb_rating_count"),
+                aggregated_rating=game.get("aggregated_rating"),
+                aggregated_rating_count=game.get("aggregated_rating_count"),
+                total_rating=game.get("total_rating"),
+                total_rating_count=game.get("total_rating_count"),
+                metacritic_score=game.get("metacritic_score"),
+                metacritic_user_score=game.get("metacritic_user_score"),
+            )
         if field == "playtime_hours" and val is None:
             label = game.get("playtime_label")
             val = _PLAYTIME_LABEL_SENTINEL.get(label)  # None if no label
@@ -377,6 +403,19 @@ def game_detail(request: Request, game_id: int, conn: sqlite3.Connection = Depen
             primary_game = g
 
     primary_game["release_date_display"] = release_date_display(primary_game)
+    primary_steam_reviews = steam_total_reviews_from_extra(primary_game.get("extra_data"))
+    primary_game["average_rating"] = calculate_effective_average_rating(
+        critics_score=primary_game.get("critics_score"),
+        steam_total_reviews=primary_steam_reviews,
+        igdb_rating=primary_game.get("igdb_rating"),
+        igdb_rating_count=primary_game.get("igdb_rating_count"),
+        aggregated_rating=primary_game.get("aggregated_rating"),
+        aggregated_rating_count=primary_game.get("aggregated_rating_count"),
+        total_rating=primary_game.get("total_rating"),
+        total_rating_count=primary_game.get("total_rating_count"),
+        metacritic_score=primary_game.get("metacritic_score"),
+        metacritic_user_score=primary_game.get("metacritic_user_score"),
+    )
 
     return templates.TemplateResponse(
         request,

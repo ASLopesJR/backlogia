@@ -13,9 +13,11 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 5050))
     debug = os.environ.get("DEBUG", "true").lower() == "true"
+    access_log = os.environ.get("ACCESS_LOG", "false").lower() == "true"
     uvicorn.run(
         "web.main:app",
         host="0.0.0.0",
         port=port,
-        reload=debug
+        reload=debug,
+        access_log=access_log,
     )

@@ -6,6 +6,7 @@ import json
 from datetime import datetime
 
 from ..config import DATABASE_PATH
+from ..utils.ratings import calculate_effective_average_rating, steam_total_reviews_from_extra
 
 
 def create_database():
@@ -987,42 +988,32 @@ def migrate_database(conn):
 def calculate_average_rating(
     critics_score=None,
     igdb_rating=None,
+    igdb_rating_count=None,
     aggregated_rating=None,
+    aggregated_rating_count=None,
     total_rating=None,
+    total_rating_count=None,
     metacritic_score=None,
     metacritic_user_score=None,
+    steam_total_reviews=None,
 ):
     """
     Calculate the average rating across all available ratings.
     All ratings are normalized to 0-100 scale.
     Returns None if no ratings are available.
     """
-    ratings = []
-
-    # Steam critics_score is already 0-100
-    if critics_score is not None:
-        ratings.append(float(critics_score))
-
-    # IGDB ratings are already 0-100
-    if igdb_rating is not None:
-        ratings.append(float(igdb_rating))
-    if aggregated_rating is not None:
-        ratings.append(float(aggregated_rating))
-    if total_rating is not None:
-        ratings.append(float(total_rating))
-
-    # Metacritic critic score is 0-100
-    if metacritic_score is not None:
-        ratings.append(float(metacritic_score))
-
-    # Metacritic user score is 0-10, normalize to 0-100
-    if metacritic_user_score is not None:
-        ratings.append(float(metacritic_user_score) * 10)
-
-    if not ratings:
-        return None
-
-    return round(sum(ratings) / len(ratings), 1)
+    return calculate_effective_average_rating(
+        critics_score=critics_score,
+        steam_total_reviews=steam_total_reviews,
+        igdb_rating=igdb_rating,
+        igdb_rating_count=igdb_rating_count,
+        aggregated_rating=aggregated_rating,
+        aggregated_rating_count=aggregated_rating_count,
+        total_rating=total_rating,
+        total_rating_count=total_rating_count,
+        metacritic_score=metacritic_score,
+        metacritic_user_score=metacritic_user_score,
+    )
 
 
 def update_average_rating(conn, game_id):
@@ -1037,8 +1028,10 @@ def update_average_rating(conn, game_id):
 
     # Fetch all rating fields for this game
     cursor.execute(
-        """SELECT critics_score, igdb_rating, aggregated_rating, total_rating,
-                  metacritic_score, metacritic_user_score
+        """SELECT critics_score, igdb_rating, igdb_rating_count,
+                  aggregated_rating, aggregated_rating_count,
+                  total_rating, total_rating_count,
+                  metacritic_score, metacritic_user_score, extra_data
            FROM games WHERE id = ?""",
         (game_id,),
     )
@@ -1049,10 +1042,14 @@ def update_average_rating(conn, game_id):
     avg = calculate_average_rating(
         critics_score=row[0],
         igdb_rating=row[1],
-        aggregated_rating=row[2],
-        total_rating=row[3],
-        metacritic_score=row[4],
-        metacritic_user_score=row[5],
+        igdb_rating_count=row[2],
+        aggregated_rating=row[3],
+        aggregated_rating_count=row[4],
+        total_rating=row[5],
+        total_rating_count=row[6],
+        metacritic_score=row[7],
+        metacritic_user_score=row[8],
+        steam_total_reviews=steam_total_reviews_from_extra(row[9]),
     )
 
     cursor.execute(

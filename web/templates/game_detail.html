@@ -1398,7 +1398,7 @@
                 {% set steam_review_desc = extra.get('review_desc') %}
                 {% set steam_total_reviews = extra.get('total_reviews') %}
                 {% set is_steam_game = store_info|selectattr('store', 'equalto', 'steam')|list|length > 0 %}
-                {% set has_steam = game.critics_score and (game.steam_app_id or is_steam_game) %}
+                {% set has_steam = (game.critics_score is not none) and (game.steam_app_id or is_steam_game) %}
                 {% set has_igdb = game.total_rating or game.igdb_rating or game.aggregated_rating %}
                 {% set has_metacritic = game.metacritic_score or game.metacritic_user_score %}
                 {% set has_protondb = game.protondb_tier and game.protondb_tier != 'unknown' %}
