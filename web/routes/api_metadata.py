@@ -416,11 +416,11 @@ def update_protondb(game_id: int, body: UpdateProtonDBRequest, conn: sqlite3.Con
 def recalculate_average_ratings(conn: sqlite3.Connection = Depends(get_db)):
     """Recalculate average ratings for all games with at least one rating."""
     from ..services.database_builder import (
-        add_average_rating_column, calculate_average_rating
+        migrate_database, calculate_average_rating
     )
 
     # Ensure the column exists
-    add_average_rating_column(conn)
+    migrate_database(conn)
 
     cursor = conn.cursor()
 
