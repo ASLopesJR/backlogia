@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Backlogia{% endblock %}</title>
+    <link rel="icon" type="image/x-icon" href="/static/favicons/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicons/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/favicons/favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/favicons/apple-touch-icon.png">
+    <link rel="manifest" href="/static/favicons/site.webmanifest">
+    <meta name="theme-color" content="#1a1a2e">
+    <link rel="stylesheet" href="/static/css/base.css">
+    <link rel="stylesheet" href="/static/css/components.css">
+    {% block head_extra %}{% endblock %}
+</head>
+<body>
+{% block nav %}
+    {% set path = request.url.path %}
+    <nav class="top-nav">
+        <a href="/" class="nav-brand">
+            <img src="/static/favicons/Backlogia_logo.png" alt="Backlogia logo">Backlogia
+        </a>
+        <div class="nav-links">
+            <a href="/" class="nav-link {% if path == '/' %}active{% endif %}">Discover</a>
+            <a href="/library" class="nav-link {% if path == '/library' %}active{% endif %}">Library</a>
+            <a href="/collections" class="nav-link {% if path.startswith('/collection') %}active{% endif %}">Collections</a>
+            <a href="/random" class="nav-link random">Random</a>
+            <a href="/settings" class="nav-link {% if path.startswith('/settings') %}active{% endif %}">Settings</a>
+        </div>
+    </nav>
+{% endblock %}
+
+{% block content %}{% endblock %}
+
+{% include '_footer.html' %}
+</body>
+</html>

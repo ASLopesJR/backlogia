@@ -1,22 +1,9 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Discover - Backlogia</title>
-    <link rel="icon" type="image/x-icon" href="/static/favicons/favicon.ico">
-    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicons/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/static/favicons/favicon-16x16.png">
-    <link rel="apple-touch-icon" sizes="180x180" href="/static/favicons/apple-touch-icon.png">
-    <link rel="manifest" href="/static/favicons/site.webmanifest">
-    <meta name="theme-color" content="#1a1a2e">
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+{% extends "_base.html" %}
 
+{% block title %}Discover - Backlogia{% endblock %}
+
+{% block head_extra %}
+<style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
             background: linear-gradient(135deg, #0d0d1a 0%, #1a1a2e 50%, #16213e 100%);
@@ -39,50 +26,7 @@
             align-items: center;
         }
 
-        .nav-brand {
-            font-size: 1.5rem;
-            font-weight: 700;
-            background: linear-gradient(90deg, #667eea, #764ba2);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            text-decoration: none;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .nav-brand img {
-            height: 32px;
-            width: 32px;
-        }
-
-        .nav-links {
-            display: flex;
-            gap: 30px;
-        }
-
-        .nav-link {
-            color: #888;
-            text-decoration: none;
-            font-size: 0.95rem;
-            transition: color 0.2s;
-        }
-
-        .nav-link:hover, .nav-link.active {
-            color: #667eea;
-        }
-
-        .nav-link.random {
-            background: linear-gradient(90deg, #667eea, #764ba2);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-
-        .nav-link.random:hover {
-            opacity: 0.8;
-        }
+        .nav-link:hover, .nav-link.active { color: #667eea; border-bottom: none; }
 
         /* Hero Section */
         .hero {
@@ -1083,8 +1027,9 @@
             }
         }
     </style>
-</head>
-<body>
+{% endblock %}
+
+{% block nav %}
     <nav class="nav">
         <a href="/" class="nav-brand"><img src="/static/favicons/Backlogia_logo.png" alt="Backlogia logo">Backlogia</a>
         <div class="nav-links">
@@ -1095,6 +1040,9 @@
             <a href="/settings" class="nav-link">Settings</a>
         </div>
     </nav>
+{% endblock %}
+
+{% block content %}
 
     {% if has_igdb_ids %}
     <section class="hero" id="hero-slideshow">
@@ -1457,9 +1405,6 @@
         {% endif %}
     </div>
 
-    {% include '_footer.html' %}
-
-    <!-- Expanded Card Overlay -->
     <div id="expanded-overlay" class="expanded-card-overlay" onclick="closeExpandedCard(event)">
         <div class="expanded-card" onclick="event.stopPropagation()">
             <button class="expanded-card-close" onclick="closeExpandedCard()">&times;</button>
@@ -2046,5 +1991,4 @@
             }
         });
     </script>
-</body>
-</html>
+{% endblock %}

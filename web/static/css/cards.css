@@ -1,0 +1,118 @@
+/* ===== Games Grid ===== */
+.games-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 20px;
+}
+
+/* ===== Game Card ===== */
+.game-card {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    overflow: hidden;
+    transition: transform 0.2s, box-shadow 0.2s;
+    position: relative;
+}
+
+.game-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.game-card-link {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+}
+
+.game-cover {
+    width: 100%;
+    aspect-ratio: 2/3;
+    object-fit: cover;
+    background: linear-gradient(135deg, #2a2a4a 0%, #1a1a3e 100%);
+}
+
+.game-cover-placeholder {
+    width: 100%;
+    aspect-ratio: 2/3;
+    background: linear-gradient(135deg, #2a2a4a 0%, #1a1a3e 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 3rem;
+    color: #444;
+}
+
+.game-info {
+    padding: 15px;
+}
+
+.game-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.game-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.8rem;
+}
+
+/* ===== Store Badges ===== */
+.store-badge {
+    padding: 3px 8px;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.store-badge.steam    { background: #1b2838; color: #66c0f4; }
+.store-badge.epic     { background: #0078f2; color: white; }
+.store-badge.gog      { background: #86328a; color: white; }
+.store-badge.itch     { background: #fa5c5c; color: white; }
+.store-badge.humble   { background: #cc2929; color: white; }
+.store-badge.battlenet { background: #009ae4; color: white; }
+.store-badge.amazon   { background: #ff9900; color: black; }
+.store-badge.ea       { background: #ff4747; color: white; }
+.store-badge.xbox     { background: #107c10; color: white; }
+.store-badge.ubisoft  { background: #3d6cbf; color: white; }
+.store-badge.local    { background: #555; color: #ccc; }
+
+/* ===== Ratings Bar (card thumbnail) ===== */
+.ratings-bar {
+    display: flex;
+    border-radius: 4px;
+    overflow: hidden;
+    font-size: 0.65rem;
+    font-weight: bold;
+    height: 20px;
+}
+
+.ratings-bar .rating {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 5px;
+    min-width: 24px;
+    color: white;
+}
+
+.ratings-bar .rating.total  { background: linear-gradient(135deg, #667eea, #764ba2); }
+.ratings-bar .rating.user   { background: linear-gradient(135deg, #2196f3, #1565c0); }
+.ratings-bar .rating.critic { background: linear-gradient(135deg, #4caf50, #2e7d32); }
+
+/* ===== Responsive ===== */
+@media (max-width: 768px) {
+    .games-grid {
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 15px;
+    }
+}
