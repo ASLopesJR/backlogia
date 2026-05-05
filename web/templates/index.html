@@ -1,111 +1,10 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Backlogia - Your Game Library</title>
-    <link rel="icon" type="image/x-icon" href="/static/favicons/favicon.ico">
-    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicons/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/static/favicons/favicon-16x16.png">
-    <link rel="apple-touch-icon" sizes="180x180" href="/static/favicons/apple-touch-icon.png">
-    <link rel="manifest" href="/static/favicons/site.webmanifest">
-    <meta name="theme-color" content="#1a1a2e">
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+{% extends "_base.html" %}
 
-        html {
-            background-color: #1a1a2e; /* Set html background to match theme */
-        }
+{% block title %}Backlogia - Your Game Library{% endblock %}
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background-color: #1a1a2e;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            min-height: 100vh;
-            color: #e4e4e4;
-        }
-
-        /* Top Navigation Bar */
-        .top-nav {
-            background: rgba(13, 13, 26, 0.95);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            padding: 15px 40px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            position: sticky;
-            top: 0;
-            z-index: 100;
-            backdrop-filter: blur(10px);
-        }
-
-        body.is-scrolling .top-nav,
-        body.is-scrolling .action-bar {
-            backdrop-filter: none !important;
-        }
-
-        .nav-brand {
-            font-size: 1.5rem;
-            font-weight: 700;
-            background: linear-gradient(90deg, #667eea, #764ba2);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            text-decoration: none;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .nav-brand img {
-            height: 32px;
-            width: 32px;
-        }
-
-        .nav-links {
-            display: flex;
-            gap: 30px;
-            align-items: center;
-        }
-
-        .nav-link {
-            color: #888;
-            text-decoration: none;
-            font-size: 0.95rem;
-            transition: color 0.2s;
-            padding: 8px 0;
-        }
-
-        .nav-link:hover {
-            color: #667eea;
-        }
-
-        .nav-link.active {
-            color: #667eea;
-            border-bottom: 2px solid #667eea;
-        }
-
-        .nav-link.random {
-            background: linear-gradient(90deg, #667eea, #764ba2);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-
-        .nav-link.random:hover {
-            opacity: 0.8;
-        }
-
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
+{% block head_extra %}
+<link rel="stylesheet" href="/static/css/cards.css">
+<style>
         header {
             padding: 8px 0 20px 0;
             position: relative;
@@ -1424,19 +1323,9 @@
         }
         .collection-tag[data-state="2"] .state-icon::before { content: "- "; }
     </style>
-</head>
-<body>
-    <nav class="top-nav">
-        <a href="/" class="nav-brand"><img src="/static/favicons/Backlogia_logo.png" alt="Backlogia logo">Backlogia</a>
-        <div class="nav-links">
-            <a href="/" class="nav-link">Discover</a>
-            <a href="/library" class="nav-link active">Library</a>
-            <a href="/collections" class="nav-link">Collections</a>
-            <a href="/random" class="nav-link random">Random</a>
-            <a href="/settings" class="nav-link">Settings</a>
-        </div>
-    </nav>
+{% endblock %}
 
+{% block content %}
     <div class="container">
         <header>
             {% set store_icons_header = {'steam': 'steam-100.png', 'epic': 'epic-100.png', 'gog': 'gog-48.png', 'itch': 'itch-90.png', 'humble': 'humble-96.png', 'battlenet': 'battlenet-100.png', 'amazon': 'amazon-120.png', 'ea': 'ea-256.png', 'xbox': 'xbox-100.png', 'ubisoft': 'ubisoft-96.png', 'local': 'local-96.png'} %}
@@ -2834,6 +2723,4 @@
             window.location.reload();
         });
     </script>
-    {% include '_footer.html' %}
-</body>
-</html>
+{% endblock %}
