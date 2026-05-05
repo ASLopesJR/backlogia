@@ -134,6 +134,36 @@ def igdb_bayesian_rating(rating, count):
 
 # --- Steam score helpers -----------------------------------------------------
 
+# Bayesian smoothing for Steam scores.
+# W ghost reviews at the prior pull low-review scores toward the mean.
+STEAM_BAYESIAN_WEIGHT = 50
+STEAM_PRIOR_MEAN = 70.0
+
+
+def steam_bayesian_score(critics_score, total_reviews):
+    """Apply Bayesian smoothing to a Steam review score.
+
+    Formula: (n * score + W * C) / (n + W)
+    where W = STEAM_BAYESIAN_WEIGHT and C = STEAM_PRIOR_MEAN.
+
+    Returns None when critics_score is None or total_reviews is below
+    MIN_STEAM_REVIEWS_FOR_COUNT.
+    """
+    if critics_score is None:
+        return None
+    try:
+        n = int(total_reviews or 0)
+    except (TypeError, ValueError):
+        return None
+    if n < MIN_STEAM_REVIEWS_FOR_COUNT:
+        return None
+    try:
+        score = float(critics_score)
+    except (TypeError, ValueError):
+        return None
+    return (n * score + STEAM_BAYESIAN_WEIGHT * STEAM_PRIOR_MEAN) / (n + STEAM_BAYESIAN_WEIGHT)
+
+
 def effective_steam_score(critics_score, total_reviews):
     """Return confidence-weighted Steam score used for sort/average.
 
@@ -166,18 +196,19 @@ def calculate_effective_average_rating(
 ):
     """Calculate weighted average.
 
-    Steam contribution is scaled by review-volume confidence.
+    Steam score is Bayesian-smoothed toward STEAM_PRIOR_MEAN using review
+    volume, so games with few reviews are pulled toward a neutral baseline
+    instead of contributing their raw (potentially perfect) score.
     IGDB ratings are Bayesian-smoothed toward IGDB_PRIOR_MEAN using their
     respective vote counts.
     """
     weighted_sum = 0.0
     total_weight = 0.0
 
-    steam_weight = steam_review_weight(steam_total_reviews)
-    steam_effective = effective_steam_score(critics_score, steam_total_reviews)
-    if steam_effective is not None and steam_weight > 0:
-        weighted_sum += steam_effective
-        total_weight += steam_weight
+    steam_bayes = steam_bayesian_score(critics_score, steam_total_reviews)
+    if steam_bayes is not None:
+        weighted_sum += steam_bayes
+        total_weight += 1.0
 
     bayes_igdb = igdb_bayesian_rating(igdb_rating, igdb_rating_count)
     if bayes_igdb is not None:
