@@ -20,6 +20,7 @@ services:
     environment:
       - DATABASE_PATH=/data/game_library.db
       - DEBUG=false
+      - ACCESS_LOG=false
       - PORT=5050
       # Steam configuration
       - STEAM_ID=${STEAM_ID:-}

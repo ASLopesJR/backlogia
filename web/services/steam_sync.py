@@ -11,6 +11,8 @@ import re
 
 import requests
 
+from ..utils.ratings import steam_review_weight, steam_weighted_review_desc
+
 # Rate limiting for Steam Store API
 _rate_limit_lock = Lock()
 _last_request_time = 0
@@ -206,12 +208,14 @@ def get_steam_review_score(appid):
             return None, "no_reviews"
 
         review_score = round((total_positive / total_reviews) * 100, 1)
-        review_desc = summary.get("review_score_desc", "")
+        review_desc = steam_weighted_review_desc(review_score, total_reviews)
+        review_weight = steam_review_weight(total_reviews)
 
         return {
             "review_score": review_score,
             "review_desc": review_desc,
             "total_reviews": total_reviews,
+            "review_weight": review_weight,
         }, None
     except Exception as e:
         return None, f"parse_error: {e}"
@@ -392,10 +396,10 @@ def sync_steam_reviews(conn, force=False, max_workers=5, progress_callback=None)
                         """UPDATE games SET
                             critics_score = ?,
                             steam_app_id = ?,
-                            extra_data = json_set(COALESCE(extra_data, '{}'), '$.steam_review_appid', ?, '$.review_desc', ?, '$.total_reviews', ?),
+                            extra_data = json_set(COALESCE(extra_data, '{}'), '$.steam_review_appid', ?, '$.review_desc', ?, '$.total_reviews', ?, '$.review_weight', ?),
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?""",
-                        (reviews["review_score"], lookup_appid, lookup_appid, reviews["review_desc"], reviews["total_reviews"], game_id),
+                        (reviews["review_score"], lookup_appid, lookup_appid, reviews["review_desc"], reviews["total_reviews"], reviews["review_weight"], game_id),
                     )
                     thread_conn.commit()
                 finally:
@@ -434,10 +438,10 @@ def sync_steam_by_appid(conn, game_id, appid):
             """UPDATE games SET
                 critics_score = ?,
                 steam_app_id = ?,
-                extra_data = json_set(COALESCE(extra_data, '{}'), '$.steam_review_appid', ?, '$.review_desc', ?, '$.total_reviews', ?),
+                extra_data = json_set(COALESCE(extra_data, '{}'), '$.steam_review_appid', ?, '$.review_desc', ?, '$.total_reviews', ?, '$.review_weight', ?),
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?""",
-            (reviews["review_score"], lookup_appid, lookup_appid, reviews["review_desc"], reviews["total_reviews"], game_id),
+            (reviews["review_score"], lookup_appid, lookup_appid, reviews["review_desc"], reviews["total_reviews"], reviews["review_weight"], game_id),
         )
     else:
         print(f"[steam review] appid={lookup_appid}: {reason}")

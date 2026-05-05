@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from ..dependencies import get_db
+from ..utils.ratings import steam_total_reviews_from_extra
 from ..utils.filters import PLAYTIME_LABELS
 
 router = APIRouter(tags=["Metadata"])
@@ -425,8 +426,11 @@ def recalculate_average_ratings(conn: sqlite3.Connection = Depends(get_db)):
 
     # Fetch all games with at least one rating
     cursor.execute(
-        """SELECT id, critics_score, igdb_rating, aggregated_rating, total_rating,
-                  metacritic_score, metacritic_user_score
+        """SELECT id, critics_score,
+                  igdb_rating, igdb_rating_count,
+                  aggregated_rating, aggregated_rating_count,
+                  total_rating, total_rating_count,
+                  metacritic_score, metacritic_user_score, extra_data
            FROM games
            WHERE critics_score IS NOT NULL
               OR igdb_rating IS NOT NULL
@@ -443,10 +447,14 @@ def recalculate_average_ratings(conn: sqlite3.Connection = Depends(get_db)):
         avg = calculate_average_rating(
             critics_score=row[1],
             igdb_rating=row[2],
-            aggregated_rating=row[3],
-            total_rating=row[4],
-            metacritic_score=row[5],
-            metacritic_user_score=row[6],
+            igdb_rating_count=row[3],
+            aggregated_rating=row[4],
+            aggregated_rating_count=row[5],
+            total_rating=row[6],
+            total_rating_count=row[7],
+            metacritic_score=row[8],
+            metacritic_user_score=row[9],
+            steam_total_reviews=steam_total_reviews_from_extra(row[10]),
         )
         if avg is not None:
             cursor.execute(

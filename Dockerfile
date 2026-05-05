@@ -36,4 +36,4 @@ ENV DATABASE_PATH=/data/game_library.db
 EXPOSE 5050
 
 # Run the FastAPI application
-CMD ["uvicorn", "web.main:app", "--host", "0.0.0.0", "--port", "5050"]
+CMD ["uvicorn", "web.main:app", "--host", "0.0.0.0", "--port", "5050", "--no-access-log"]
