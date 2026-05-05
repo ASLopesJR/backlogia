@@ -7,10 +7,13 @@ from web.utils.ratings import (
     calculate_effective_average_rating,
     effective_steam_score,
     igdb_bayesian_rating,
+    steam_bayesian_score,
     steam_review_weight,
     steam_weighted_review_desc,
     IGDB_BAYESIAN_WEIGHT,
     IGDB_PRIOR_MEAN,
+    STEAM_BAYESIAN_WEIGHT,
+    STEAM_PRIOR_MEAN,
 )
 
 
@@ -41,9 +44,10 @@ def test_steam_review_desc_tiers_match_spec():
 
 
 def test_average_rating_uses_volume_weighted_steam_score():
-    # Steam contributes 95 * 0.25 = 23.75 (weight=0.25).
-    # IGDB 90 with 1000 votes: bayesian ≈ 90.0 (weight=1.0).
-    # Average is (23.75 + ~90) / (0.25 + 1) ≈ 91.0
+    # Steam Bayesian with 10 reviews at 95%:
+    #   (10*95 + 50*70) / (10+50) = 4450/60 ≈ 74.2
+    # IGDB 90 with 1000 votes: Bayesian ≈ 89.5 (weight=1.0)
+    # Average ≈ (74.2 + 89.5) / 2 ≈ 81.9
     avg = calculate_effective_average_rating(
         critics_score=95,
         steam_total_reviews=10,
@@ -51,8 +55,7 @@ def test_average_rating_uses_volume_weighted_steam_score():
         igdb_rating_count=1000,
     )
     assert avg is not None
-    # With 1000 votes Bayesian barely moves from 90; result should be ~91.
-    assert 90.0 <= avg <= 92.0
+    assert 80.0 <= avg <= 84.0
 
 
 def test_average_rating_ignores_steam_when_below_min_reviews():
@@ -65,6 +68,44 @@ def test_average_rating_ignores_steam_when_below_min_reviews():
     # Steam excluded; only IGDB Bayesian value contributes.
     expected = igdb_bayesian_rating(80, 500)
     assert avg == round(expected, 1)
+
+
+def test_steam_bayesian_score_below_threshold_is_none():
+    assert steam_bayesian_score(100, 9) is None
+    assert steam_bayesian_score(100, 0) is None
+    assert steam_bayesian_score(None, 100) is None
+
+
+def test_steam_bayesian_score_collapses_to_prior_with_min_reviews():
+    # With exactly MIN reviews the score is still pulled strongly toward the prior.
+    result = steam_bayesian_score(100.0, 10)
+    assert result is not None
+    assert result < 100.0
+    assert result > STEAM_PRIOR_MEAN
+
+
+def test_steam_bayesian_score_high_volume_approaches_raw():
+    # With many reviews the Bayesian score should be very close to the raw score.
+    result = steam_bayesian_score(99.0, 10_000)
+    assert result is not None
+    assert abs(result - 99.0) < 0.5
+
+
+def test_average_rating_steam_low_reviews_ranked_below_high_reviews():
+    # A game with 10 reviews at 100% should score LOWER than one with 1000
+    # reviews at 99%. This was the original bug: the weight cancelled out,
+    # making 100%/10 reviews beat 99%/1000 reviews.
+    avg_few = calculate_effective_average_rating(
+        critics_score=100,
+        steam_total_reviews=10,
+    )
+    avg_many = calculate_effective_average_rating(
+        critics_score=99,
+        steam_total_reviews=1000,
+    )
+    assert avg_few is not None
+    assert avg_many is not None
+    assert avg_many > avg_few
 
 
 # ---------------------------------------------------------------------------
