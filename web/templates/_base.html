@@ -28,7 +28,31 @@
             <a href="/random" class="nav-link random">Random</a>
             <a href="/settings" class="nav-link {% if path.startswith('/settings') %}active{% endif %}">Settings</a>
         </div>
+        <button class="nav-hamburger" aria-label="Toggle navigation" aria-expanded="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="3" y1="6" x2="21" y2="6"/>
+                <line x1="3" y1="12" x2="21" y2="12"/>
+                <line x1="3" y1="18" x2="21" y2="18"/>
+            </svg>
+        </button>
     </nav>
+    <script>
+        (function() {
+            var nav = document.querySelector('.top-nav');
+            var btn = document.querySelector('.nav-hamburger');
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                var open = nav.classList.toggle('nav-open');
+                btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            });
+            document.addEventListener('click', function(e) {
+                if (!nav.contains(e.target)) {
+                    nav.classList.remove('nav-open');
+                    btn.setAttribute('aria-expanded', 'false');
+                }
+            });
+        })();
+    </script>
 {% endblock %}
 
 {% block content %}{% endblock %}
