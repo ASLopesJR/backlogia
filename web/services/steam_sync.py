@@ -151,6 +151,11 @@ def get_steam_store_info(appid):
         screenshots = [
             s["path_full"] for s in data.get("screenshots") or [] if s.get("path_full")
         ][:5]
+        categories = [
+            {"id": c["id"], "description": c["description"]}
+            for c in (data.get("categories") or [])
+            if "id" in c and "description" in c
+        ]
         json_data = data.get("release_date") or {}
         comming_soon = json_data.get("coming_soon")
         release_date_raw = json_data.get("date")
@@ -170,6 +175,7 @@ def get_steam_store_info(appid):
             "publishers": publishers,
             "release_date": release_date,
             "screenshots": screenshots,
+            "categories": categories,
         }, None
     except Exception as e:
         return None, f"parse_error: {e}"
@@ -302,6 +308,22 @@ def sync_steam_store_info(conn, force=False, max_workers=5, progress_callback=No
                          lookup_appid,
                          game_id),
                     )
+                    # Upsert Steam categories and refresh the game↔category links
+                    game_categories = store_info.get("categories") or []
+                    if game_categories:
+                        for cat in game_categories:
+                            thread_conn.execute(
+                                "INSERT OR REPLACE INTO steam_categories(id, description) VALUES (?, ?)",
+                                (cat["id"], cat["description"]),
+                            )
+                        thread_conn.execute(
+                            "DELETE FROM game_steam_categories WHERE game_id = ?",
+                            (game_id,),
+                        )
+                        thread_conn.executemany(
+                            "INSERT INTO game_steam_categories(game_id, category_id) VALUES (?, ?)",
+                            [(game_id, cat["id"]) for cat in game_categories],
+                        )
                     thread_conn.commit()
                 finally:
                     thread_conn.close()
@@ -469,6 +491,22 @@ def sync_steam_by_appid(conn, game_id, appid):
                 lookup_appid,
                 game_id),
         )
+        # Upsert Steam categories and refresh the game↔category links
+        game_categories = store_info.get("categories") or []
+        if game_categories:
+            for cat in game_categories:
+                cursor.execute(
+                    "INSERT OR REPLACE INTO steam_categories(id, description) VALUES (?, ?)",
+                    (cat["id"], cat["description"]),
+                )
+            cursor.execute(
+                "DELETE FROM game_steam_categories WHERE game_id = ?",
+                (game_id,),
+            )
+            cursor.executemany(
+                "INSERT INTO game_steam_categories(game_id, category_id) VALUES (?, ?)",
+                [(game_id, cat["id"]) for cat in game_categories],
+            )
 
 def sync_steam(conn, force=False, max_workers=5, progress_callback=None):
     """Fetch Steam review scores for all Steam games in the database and update critics_score.

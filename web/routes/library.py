@@ -43,6 +43,7 @@ def library(
     nsfw_mode: str = Query(default="hidden"),
     nsfw: Optional[bool] = Query(default=None),
     playtime_label: list[str] = Query(default=[]),
+    categories: list[str] = Query(default=[]),
     collections_include: list[int] = Query(default=[]),
     collections_exclude: list[int] = Query(default=[]),
     conn: sqlite3.Connection = Depends(get_db)
@@ -152,6 +153,16 @@ def library(
             else:  # abandoned – explicit label only
                 label_conditions.append(f"playtime_label = '{lbl}'")
         query += " AND (" + " OR ".join(label_conditions) + ")"
+
+    # Steam categories filter – AND semantics: game must have all selected categories
+    for cat in categories:
+        query += (
+            " AND id IN ("
+            "SELECT game_id FROM game_steam_categories gsc"
+            " JOIN steam_categories sc ON gsc.category_id = sc.id"
+            " WHERE sc.description = ?)"
+        )
+        params.append(cat)
 
     # Sorting - detect which columns actually exist in the DB
     cursor.execute("PRAGMA table_info(games)")
@@ -306,6 +317,18 @@ def library(
     # Sort genres by count (descending) then alphabetically
     genre_counts = dict(sorted(genre_counts.items(), key=lambda x: (-x[1], x[0].lower())))
 
+    # Get Steam category counts for the filter panel
+    cursor.execute("""
+        SELECT sc.description, COUNT(gsc.game_id)
+        FROM steam_categories sc
+        JOIN game_steam_categories gsc ON sc.id = gsc.category_id
+        JOIN games g ON gsc.game_id = g.id
+        WHERE g.hidden = 0 AND g.removed = 0
+        GROUP BY sc.id, sc.description
+        ORDER BY sc.description
+    """)
+    category_counts = {row[0]: row[1] for row in cursor.fetchall()}
+
     return templates.TemplateResponse(
         request,
         "index.html",
@@ -313,12 +336,14 @@ def library(
             "games": grouped_games,
             "store_counts": store_counts,
             "genre_counts": genre_counts,
+            "category_counts": category_counts,
             "total_count": total_count,
             "unique_count": len(grouped_games),
             "hidden_count": hidden_count,
             "removed_count": removed_count,
             "current_stores": stores,
             "current_genres": genres,
+            "current_categories": categories,
             "current_search": search,
             "current_sort": sort,
             "current_order": order,
@@ -444,6 +469,22 @@ def game_detail(request: Request, game_id: int, conn: sqlite3.Connection = Depen
         metacritic_user_score=primary_game.get("metacritic_user_score"),
     )
 
+    related_ids = [g["id"] for g in related_games]
+    steam_categories = []
+    if related_ids:
+        placeholders = ",".join("?" * len(related_ids))
+        cursor.execute(
+            f"""
+            SELECT DISTINCT sc.description
+            FROM game_steam_categories gsc
+            JOIN steam_categories sc ON sc.id = gsc.category_id
+            WHERE gsc.game_id IN ({placeholders})
+            ORDER BY sc.description COLLATE NOCASE
+            """,
+            related_ids,
+        )
+        steam_categories = [row[0] for row in cursor.fetchall()]
+
     return templates.TemplateResponse(
         request,
         "game_detail.html",
@@ -451,6 +492,7 @@ def game_detail(request: Request, game_id: int, conn: sqlite3.Connection = Depen
             "game": primary_game,
             "store_info": store_info,
             "related_games": related_games,
+            "steam_categories": steam_categories,
             "parse_json": parse_json_field,
             "get_store_url": get_store_url
         }

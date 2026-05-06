@@ -71,3 +71,11 @@ def api_genres(conn: sqlite3.Connection = Depends(get_db)):
                 pass
 
     return sorted(genres_set)
+
+
+@router.get("/api/categories")
+def api_categories(conn: sqlite3.Connection = Depends(get_db)):
+    """Get all Steam categories cached from the library."""
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, description FROM steam_categories ORDER BY description")
+    return [{"id": row[0], "description": row[1]} for row in cursor.fetchall()]

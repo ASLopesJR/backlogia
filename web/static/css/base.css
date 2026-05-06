@@ -172,7 +172,6 @@ body.is-scrolling .action-bar {
     .top-nav {
         padding: 12px 20px;
         flex-wrap: wrap;
-        position: relative;
     }
 
     .nav-hamburger {

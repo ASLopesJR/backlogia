@@ -76,6 +76,19 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             finished_at TIMESTAMP,
             result TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS steam_categories (
+            id INTEGER PRIMARY KEY,
+            description TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS game_steam_categories (
+            game_id INTEGER NOT NULL,
+            category_id INTEGER NOT NULL,
+            PRIMARY KEY (game_id, category_id),
+            FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
+            FOREIGN KEY (category_id) REFERENCES steam_categories(id)
+        );
     """)
 
 

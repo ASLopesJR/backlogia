@@ -149,6 +149,25 @@ def create_database():
         )
     """)
 
+    # Steam categories cache (id comes from the Steam API; description may change over time)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS steam_categories (
+            id INTEGER PRIMARY KEY,
+            description TEXT NOT NULL
+        )
+    """)
+
+    # Junction table linking games to their Steam categories
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS game_steam_categories (
+            game_id INTEGER NOT NULL,
+            category_id INTEGER NOT NULL,
+            PRIMARY KEY (game_id, category_id),
+            FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
+            FOREIGN KEY (category_id) REFERENCES steam_categories(id)
+        )
+    """)
+
     conn.commit()
     return conn
 
@@ -971,7 +990,24 @@ def migrate_database(conn):
     # Add indices
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_steam_app_id ON games(steam_app_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_igdb_id ON games(igdb_id)")
-    
+
+    # Ensure Steam categories tables exist (safe to run on existing databases)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS steam_categories (
+            id INTEGER PRIMARY KEY,
+            description TEXT NOT NULL
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS game_steam_categories (
+            game_id INTEGER NOT NULL,
+            category_id INTEGER NOT NULL,
+            PRIMARY KEY (game_id, category_id),
+            FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
+            FOREIGN KEY (category_id) REFERENCES steam_categories(id)
+        )
+    """)
+
     conn.commit()
 
 
