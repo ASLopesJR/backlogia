@@ -8,7 +8,7 @@ jobs:
 
   build:
 
-    runs-on: python:3.11-slim
+    runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4

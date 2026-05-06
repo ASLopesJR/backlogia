@@ -2,6 +2,7 @@ name: Build and Push to GHCR
 
 on:
   push:
+    branches: [ "main" ]
     tags:
       - 'v*'
   workflow_dispatch:
