@@ -372,18 +372,7 @@ def import_gog_games(conn):
                         publishers, genres, cover_image, background_image,
                         icon, release_date, critics_score, extra_data, updated_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(store, store_id) DO UPDATE SET
-                        name = excluded.name,
-                        description = excluded.description,
-                        developers = excluded.developers,
-                        publishers = excluded.publishers,
-                        cover_image = excluded.cover_image,
-                        background_image = excluded.background_image,
-                        icon = excluded.icon,
-                        release_date = excluded.release_date,
-                        critics_score = excluded.critics_score,
-                        extra_data = excluded.extra_data,
-                        updated_at = excluded.updated_at
+                    ON CONFLICT(store, store_id) DO NOTHING
                 """, (
                     game.get("name"),
                     "gog",
@@ -402,7 +391,8 @@ def import_gog_games(conn):
                 ))
                 if store_id:
                     seen_store_ids.add(str(store_id))
-                count += 1
+                if cursor.rowcount > 0:
+                    count += 1
             except Exception as e:
                 print(f"  Error importing {game.get('name')}: {e}")
 
