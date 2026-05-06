@@ -40,6 +40,8 @@ def library(
     protondb_tier: str = "",
     no_igdb: bool = False,
     no_steam: bool = False,
+    nsfw_mode: str = Query(default="hidden"),
+    nsfw: Optional[bool] = Query(default=None),
     playtime_label: list[str] = Query(default=[]),
     collections_include: list[int] = Query(default=[]),
     collections_exclude: list[int] = Query(default=[]),
@@ -107,6 +109,19 @@ def library(
     # No Steam data filter
     if no_steam:
         query += " AND (steam_app_id IS NULL OR steam_app_id = 0)"
+
+    # NSFW tri-state filter:
+    # - hidden (default): hide NSFW
+    # - visible: show both
+    # - only: show NSFW only
+    # Backward compatibility: ?nsfw=true maps to visible.
+    if nsfw_mode not in {"hidden", "visible", "only"}:
+        nsfw_mode = "visible" if nsfw else "hidden"
+
+    if nsfw_mode == "hidden":
+        query += " AND (nsfw IS NULL OR nsfw = 0)"
+    elif nsfw_mode == "only":
+        query += " AND nsfw = 1"
 
     # Playtime label filter – supports multiple values; unplayed/tried/played
     # also match games with no explicit label using playtime_hours ranges.
@@ -311,6 +326,7 @@ def library(
             "current_protondb_tier": protondb_tier,
             "current_no_igdb": no_igdb,
             "current_no_steam": no_steam,
+            "current_nsfw_mode": nsfw_mode,
             "current_playtime_labels": playtime_label,
             "current_collections_include": collections_include,
             "current_collections_exclude": collections_exclude,
