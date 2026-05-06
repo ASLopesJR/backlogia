@@ -11,7 +11,7 @@
 
 services:
   backlogia:
-    image: ghcr.io/sam1am/backlogia:latest
+    image: ghcr.io/aslopesjr/backlogia:latest
     container_name: backlogia
     ports:
       - "${WEB_PORT:-5050}:5050"

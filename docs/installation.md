@@ -1,9 +1,16 @@
 # Installation
 
-- [Pre-built Image (Recommended)](#option-1-pre-built-image-recommended)
-- [Build from Source (Docker)](#option-2-build-from-source-docker)
-- [Local Installation](#option-3-local-installation)
-- [Docker Volumes](#docker-volumes)
+- [Installation](#installation)
+  - [Option 1: Pre-built Image (Recommended)](#option-1-pre-built-image-recommended)
+    - [Updating (Pre-built Image)](#updating-pre-built-image)
+  - [Option 2: Build from Source (Docker)](#option-2-build-from-source-docker)
+    - [Updating (Build from Source)](#updating-build-from-source)
+  - [Option 3: Local Installation](#option-3-local-installation)
+    - [Prerequisites](#prerequisites)
+      - [Amazon Games Prerequisites](#amazon-games-prerequisites)
+    - [Steps](#steps)
+    - [Updating (Local Installation)](#updating-local-installation)
+  - [Docker Volumes](#docker-volumes)
 
 ---
 
@@ -18,8 +25,8 @@ The easiest way to run Backlogia—no cloning or building required.
 
 2. **Download the configuration files**
    ```bash
-   curl -O https://raw.githubusercontent.com/sam1am/backlogia/main/.env.example
-   curl -O https://raw.githubusercontent.com/sam1am/backlogia/main/docker-compose.ghcr.yml
+   curl -O https://raw.githubusercontent.com/ASLopesJR/backlogia/main/.env.example
+   curl -O https://raw.githubusercontent.com/ASLopesJR/backlogia/main/docker-compose.ghcr.yml
    ```
 
 3. **Create your environment file**
@@ -51,7 +58,7 @@ Build the image locally from the repository.
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/sam1am/backlogia.git
+   git clone https://github.com/ASLopesJR/backlogia.git
    cd backlogia
    ```
 
@@ -97,7 +104,7 @@ docker compose up -d --build
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/sam1am/backlogia.git
+   git clone https://github.com/ASLopesJR/backlogia.git
    cd backlogia
    ```
 

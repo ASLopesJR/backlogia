@@ -113,8 +113,8 @@ Highlights included in this fork:
 1. **Create a directory and download config files**
    ```bash
    mkdir backlogia && cd backlogia
-   curl -O https://raw.githubusercontent.com/sam1am/backlogia/main/.env.example
-   curl -O https://raw.githubusercontent.com/sam1am/backlogia/main/docker-compose.ghcr.yml
+   curl -O https://raw.githubusercontent.com/ASLopesJR/backlogia/main/.env.example
+   curl -O https://raw.githubusercontent.com/ASLopesJR/backlogia/main/docker-compose.ghcr.yml
    cp .env.example .env
    ```
 
