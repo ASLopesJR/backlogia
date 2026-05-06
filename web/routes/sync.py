@@ -585,10 +585,7 @@ def import_gog_games(request: GOGImportRequest):
                     INSERT INTO games (
                         name, store, store_id, extra_data, updated_at
                     ) VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT(store, store_id) DO UPDATE SET
-                        name = excluded.name,
-                        extra_data = excluded.extra_data,
-                        updated_at = excluded.updated_at
+                    ON CONFLICT(store, store_id) DO NOTHING
                 """, (
                     game.title,
                     "gog",
@@ -596,7 +593,8 @@ def import_gog_games(request: GOGImportRequest):
                     json.dumps(extra_data),
                     datetime.now().isoformat()
                 ))
-                count += 1
+                if cursor.rowcount > 0:
+                    count += 1
             except Exception as e:
                 print(f"  Error importing {game.title}: {e}")
 
