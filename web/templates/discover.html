@@ -12,22 +12,6 @@
             overflow-x: hidden;
         }
 
-        /* Navigation */
-        .nav {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            z-index: 100;
-            background: linear-gradient(180deg, rgba(13, 13, 26, 0.95) 0%, rgba(13, 13, 26, 0) 100%);
-            padding: 20px 40px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .nav-link:hover, .nav-link.active { color: #667eea; border-bottom: none; }
-
         /* Hero Section */
         .hero {
             position: relative;
@@ -866,10 +850,6 @@
 
         /* Responsive */
         @media (max-width: 768px) {
-            .nav {
-                padding: 15px 20px;
-            }
-
             .hero {
                 height: 60vh;
             }
@@ -1027,19 +1007,6 @@
             }
         }
     </style>
-{% endblock %}
-
-{% block nav %}
-    <nav class="nav">
-        <a href="/" class="nav-brand"><img src="/static/favicons/Backlogia_logo.png" alt="Backlogia logo">Backlogia</a>
-        <div class="nav-links">
-            <a href="/" class="nav-link active">Discover</a>
-            <a href="/library" class="nav-link">Library</a>
-            <a href="/collections" class="nav-link">Collections</a>
-            <a href="/random" class="nav-link random">Random</a>
-            <a href="/settings" class="nav-link">Settings</a>
-        </div>
-    </nav>
 {% endblock %}
 
 {% block content %}
